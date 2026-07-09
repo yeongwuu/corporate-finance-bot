@@ -18,16 +18,21 @@ backend/
 │   └── simple_rag.py              # knowledge 문서에서 질문과 관련된 기준을 검색하는 간단한 RAG
 ├── knowledge/
 │   ├── corporate_finance_policy.md # 재무관리 답변과 계산의 기본 정책
+│   ├── finance_basics.md           # 조달과 운용, 재무관리 목표, 자본비용 기초 개념
+│   ├── time_value_of_money.md       # 현재가치, 미래가치, 연금, 실효이자율 기준
 │   ├── capital_budgeting.md        # NPV, IRR, 회수기간 등 투자안 평가 기준
 │   ├── cost_of_capital.md          # WACC, CAPM, 할인율 관련 기준
 │   ├── financial_ratios.md         # 유동비율, 부채비율, ROE 등 재무비율 기준
 │   ├── working_capital.md          # 운전자본과 현금전환주기 기준
-│   ├── valuation.md                # DCF, 기업가치, 배수평가 기준
+│   ├── valuation.md                # DCF, 배당할인모형, 주식가치, 배수평가 기준
 │   └── report_templates.md         # 재무관리 답변 문장 템플릿
 └── tools/
     ├── capital_budgeting_tool.py  # NPV와 투자안 평가 계산
     ├── cost_of_capital_tool.py    # WACC와 자본비용 계산
+    ├── finance_concept_tool.py    # 재무관리 기초 개념 설명
     ├── financial_ratio_tool.py    # 주요 재무비율 계산
+    ├── time_value_tool.py         # 화폐의 시간가치 계산
+    ├── valuation_tool.py          # 배당할인모형과 주식가치 계산
     └── working_capital_tool.py    # 운전자본과 현금전환주기 계산
 ```
 
