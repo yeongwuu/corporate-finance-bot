@@ -49,3 +49,11 @@ uvicorn server:app --reload --port 8000
 - RAG: `backend/knowledge/*.md`에서 재무관리 기준과 공식 설명을 검색합니다.
 - Tools: NPV, WACC, 재무비율, 운전자본 계산을 Python으로 수행합니다.
 - LLM: `backend/llm_client.py`에서 계산 결과와 검색 근거를 실무 답변 문장으로 정리합니다.
+
+## Development Direction
+
+- 재무관리 이론 텍스트는 관련 `backend/knowledge/*.md` 파일에 정리합니다.
+- 계산 가능한 공식과 예제는 대응되는 `backend/tools/*.py` 파일에 구현합니다.
+- 새 주제가 기존 파일과 유사하면 기존 파일에 이어서 작성하고, 관련 파일이 없을 때만 새 파일을 만듭니다.
+- 새 Tool을 추가하면 `backend/main_agent.py`, `backend/SKILL.md`, `README.md`에 함께 반영합니다.
+- 답변은 RAG 검색 근거와 Python Tool 계산 결과를 조합해 생성합니다.
