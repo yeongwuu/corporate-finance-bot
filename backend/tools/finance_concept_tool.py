@@ -14,6 +14,18 @@ def explain_finance_concept(question: str) -> dict:
             ],
         }
 
+    if any(term in compact for term in ["이익극대화", "회계적이익극대화"]):
+        return {
+            "status": "ok",
+            "summary": "회계적 이익 극대화는 재무관리 목표로 한계가 있어 기업가치 극대화가 더 적절합니다.",
+            "steps": [
+                "경영자의 회계처리 의도에 따라 이익의 크기가 달라질 수 있습니다.",
+                "화폐의 시간가치를 반영하지 못합니다.",
+                "단기간의 회계성과에 치중할 가능성이 있습니다.",
+                "미래 현금흐름의 불확실성을 충분히 고려하지 못합니다.",
+            ],
+        }
+
     if any(term in normalized for term in ["재무관리 목표", "기업가치", "주주가치", "이해관계자", "esg"]) or any(
         term in compact for term in ["재무관리목표", "재무관리의목표"]
     ):

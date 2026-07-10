@@ -23,6 +23,7 @@ backend/
 │   ├── capital_budgeting.md        # NPV, IRR, 회수기간 등 투자안 평가 기준
 │   ├── cost_of_capital.md          # WACC, CAPM, 할인율 관련 기준
 │   ├── financial_ratios.md         # 유동비율, 부채비율, ROE 등 재무비율 기준
+│   ├── risk_return.md              # 위험 태도, 기대효용, 전망이론 기준
 │   ├── working_capital.md          # 운전자본과 현금전환주기 기준
 │   ├── valuation.md                # DCF, 배당할인모형, 주식가치, 배수평가 기준
 │   └── report_templates.md         # 재무관리 답변 문장 템플릿
@@ -31,6 +32,7 @@ backend/
     ├── cost_of_capital_tool.py    # WACC와 자본비용 계산
     ├── finance_concept_tool.py    # 재무관리 기초 개념 설명
     ├── financial_ratio_tool.py    # 주요 재무비율 계산
+    ├── risk_utility_tool.py       # 위험 태도, 기대효용, 전망이론, 보험료 계산
     ├── time_value_tool.py         # 화폐의 시간가치 계산
     ├── valuation_tool.py          # 배당할인모형과 주식가치 계산
     └── working_capital_tool.py    # 운전자본과 현금전환주기 계산
