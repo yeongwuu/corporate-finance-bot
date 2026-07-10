@@ -16,6 +16,7 @@
 - `tools/cost_of_capital_tool.py`: WACC, 자본비용 계산.
 - `tools/finance_concept_tool.py`: 재무관리 기초, FCF, 기업가치, 자본비용 개념 설명.
 - `tools/financial_ratio_tool.py`: 유동비율, 부채비율, ROE 등 재무비율 계산.
+- `tools/portfolio_tool.py`: 포트폴리오 기대수익률, 분산, 공분산, 상관계수 계산.
 - `tools/risk_utility_tool.py`: 위험 태도, 기대효용, 확실성등가, 위험프리미엄 계산.
 - `tools/time_value_tool.py`: 현재가치, 미래가치, 연금, 영구연금, 실효이자율 계산.
 - `tools/valuation_tool.py`: 배당할인모형, 항상성장모형, NPVGO, PER, PBR 계산.
