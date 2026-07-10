@@ -4,6 +4,7 @@ from tools.capital_budgeting_tool import analyze_capital_budgeting
 from tools.cost_of_capital_tool import calculate_cost_of_capital
 from tools.finance_concept_tool import explain_finance_concept
 from tools.financial_ratio_tool import analyze_financial_ratios
+from tools.mergers_acquisitions_tool import analyze_mergers_acquisitions
 from tools.portfolio_tool import analyze_portfolio
 from tools.risk_utility_tool import analyze_risk_utility
 from tools.time_value_tool import analyze_time_value
@@ -34,6 +35,11 @@ def answer_finance_question(question: str) -> dict:
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    if any(word in normalized for word in ["비교기업", "대용기업", "투자안 베타", "프로젝트 베타", "조정현가", "apv", "목표 부채", "부채비율 유지", "이자비용 절세효과의 현재가치", "이자비용 절세효과 현재가치"]):
+        return "capital_budgeting_tool"
+    if any(word in normalized for word in ["m&a", "m＆a", "인수합병", "인수 합병", "합병", "흡수합병", "신설합병", "수직적 합병", "수평적 합병", "다각적 합병", "공개매수", "곰의 포옹", "새벽의 기습", "lbo", "mbo", "차입매수", "경영자매수", "적대적", "독약조항", "독약 풋", "황금낙하산", "백기사", "백지주", "황금주", "차등의결권", "팩맨", "왕관의 보석", "녹색편지", "행동주의 펀드", "토빈의 q", "저평가 가설", "경영자주의"]):
+        return "mergers_acquisitions_tool"
 
     if any(
         word in normalized
@@ -70,6 +76,10 @@ def select_tool(question: str) -> str:
         return "financial_ratio_tool"
     if any(word in normalized for word in ["현금전환주기", "현금순환주기", "ccc", "운전자본"]):
         return "working_capital_tool"
+    if any(word in normalized for word in ["ceq", "확실성등가", "확실성 등가", "경제적 부가가치", "시장부가가치", "시장 부가가치", "초과이익", "잔여이익", "잔여 이익", "npv 곡선", "피셔", "자본할당", "중복투자", "분할투자", "반복투자", "최소공배수", "무한반복", "연간균등가치", "aev", "투자기회선", "한계자본비용", "명목 현금흐름", "실질 현금흐름", "인플레이션", "비교기업", "대용기업", "투자안 베타", "프로젝트 베타", "조정현가", "apv", "목표 부채", "부채비율 유지", "이자비용 절세효과의 현재가치"]):
+        return "capital_budgeting_tool"
+    if any(word in normalized for word in ["자본구조", "mm이론", "mm 1958", "mm 1963", "하마다", "hamada", "무부채 베타", "주식베타", "주식 베타", "법인세율 변화", "개인소득세", "이자소득세", "주식투자소득세", "밀러", "miller", "균형부채", "deangelo", "masulis", "디안젤로", "마술리스", "비부채성 감세", "대리비용", "위험선호", "과소투자", "재산도피", "파산비용", "기대 파산", "자본조달순위", "pecking", "신호효과", "signaling", "순이익 접근", "순영업이익 접근", "전통적 접근", "miles", "ezzell", "harris", "pringle", "차익거래", "위험부채", "절세효과"]):
+        return "cost_of_capital_tool"
     if any(
         word in normalized
         for word in [
@@ -208,19 +218,23 @@ def select_tool(question: str) -> str:
         ]
     ):
         return "valuation_tool"
+    if any(word in normalized for word in ["증분현금흐름", "증분 현금흐름", "apv", "fte", "wacc법", "wacc 법", "조정현가", "조정 현가", "주주가치평가", "주주 가치 평가", "가중평균자본비용법", "ceq", "확실성등가", "확실성 등가", "eva", "mva", "rim", "경제적 부가가치", "시장부가가치", "시장 부가가치", "초과이익", "잔여이익", "잔여 이익", "npv 곡선", "피셔", "자본할당", "중복투자", "분할투자", "반복투자", "최소공배수", "무한반복", "연간균등가치", "aev", "투자기회선", "한계자본비용", "명목 현금흐름", "실질 현금흐름", "인플레이션", "비교기업", "대용기업", "투자안 베타", "프로젝트 베타", "목표 부채", "부채비율 유지", "이자비용 절세효과의 현재가치"]):
+        return "capital_budgeting_tool"
     if (
         any(word in normalized for word in ["현재가치", "미래가치", "연금", "영구연금", "실효이자율", "표시이자율", "할인율", "복리", "유동성 선호", "정기예금", "원금의 두"])
         or any(word in normalized for word in ["pv", "fv", "ear", "apr", "annuity", "perpetuity"])
     ):
         return "time_value_tool"
-    if any(word in normalized for word in ["npv", "순현재가치", "irr", "투자안", "회수기간"]):
+    if any(word in normalized for word in ["npv", "순현재가치", "irr", "투자안", "회수기간", "증분현금흐름", "증분 현금흐름", "투자시점", "종료시점", "투자 종료", "최저가격", "잉여현금흐름", "free cash flow", "fcf", "fcff", "fcfe", "영업현금흐름", "주주 현금흐름", "주주현금흐름", "채권자 현금흐름", "채권자현금흐름", "apv", "fte", "wacc법", "wacc 법", "조정현가", "조정 현가", "주주가치평가", "주주 가치 평가", "가중평균자본비용법", "ceq", "확실성등가", "확실성 등가", "eva", "mva", "rim", "경제적 부가가치", "시장부가가치", "시장 부가가치", "초과이익", "잔여이익", "잔여 이익", "npv 곡선", "피셔", "자본할당", "중복투자", "분할투자", "반복투자", "최소공배수", "무한반복", "연간균등가치", "aev", "투자기회선", "한계자본비용", "명목 현금흐름", "실질 현금흐름", "인플레이션", "비교기업", "대용기업", "투자안 베타", "프로젝트 베타", "목표 부채", "부채비율 유지", "이자비용 절세효과의 현재가치"]):
         return "capital_budgeting_tool"
+    if any(word in normalized for word in ["wacc", "자본비용", "타인자본", "자기자본", "레버리지", "영업위험", "재무위험", "dol", "dfl", "dcl", "ebit-eps", "ebit eps", "자본조달분기점", "재무손익분기점", "자본구조", "최적 자본 구조", "mm이론", "mm 1958", "mm 1963", "무부채기업", "부채기업", "수정 이론", "하마다", "hamada", "주식베타", "주식 베타", "무부채 베타", "법인세율 변화", "개인소득세", "이자소득세", "주식투자소득세", "밀러", "miller", "균형부채", "deangelo", "masulis", "디안젤로", "마술리스", "비부채성 감세", "대리비용", "위험선호", "과소투자", "재산도피", "자본조달순위", "pecking", "신호효과", "signaling", "순이익 접근", "순영업이익 접근", "전통적 접근", "miles", "ezzell", "harris", "pringle", "차익거래", "위험부채", "절세효과", "부채 사용", "이자비용 절세", "파산비용", "기대 파산"]):
+        return "cost_of_capital_tool"
     if (
-        any(word in normalized for word in ["잉여현금흐름", "free cash flow", "fcf", "기업가치", "주주가치", "이해관계자", "esg", "조달", "운용", "요구수익률"])
+        any(word in normalized for word in ["기업가치", "주주가치", "이해관계자", "esg", "조달", "운용", "요구수익률"])
         or any(word in compact for word in ["재무관리목표", "재무관리의목표", "타인자본비용", "자기자본비용", "이익극대화", "회계적이익극대화"])
     ):
         return "finance_concept_tool"
-    if any(word in normalized for word in ["wacc", "자본비용", "타인자본", "자기자본", "capm"]):
+    if any(word in normalized for word in ["wacc", "자본비용", "타인자본", "자기자본"]):
         return "cost_of_capital_tool"
     if any(word in normalized for word in ["roe", "roa", "재무비율"]):
         return "financial_ratio_tool"
@@ -236,6 +250,8 @@ def run_tool(tool_name: str, question: str) -> dict:
         return explain_finance_concept(question)
     if tool_name == "financial_ratio_tool":
         return analyze_financial_ratios(question)
+    if tool_name == "mergers_acquisitions_tool":
+        return analyze_mergers_acquisitions(question)
     if tool_name == "portfolio_tool":
         return analyze_portfolio(question)
     if tool_name == "risk_utility_tool":
