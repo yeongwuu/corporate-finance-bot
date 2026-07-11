@@ -104,7 +104,8 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         }
 
     period = _extract_period(question, available_years)
-    account_keys = _extract_accounts(question)
+    ratio_keys = _extract_ratio_accounts(question)
+    account_keys = _extract_accounts(question, ratio_keys)
     series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
     if not series:
         return {
@@ -113,7 +114,8 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
             "steps": [f"가용 연도: {', '.join(map(str, available_years))}"],
         }
 
-    metrics = _build_metric_summary(series, account_keys)
+    ratio_series = _build_ratio_series(series, ratio_keys)
+    metrics = [] if ratio_series else _build_metric_summary(series, account_keys)
     news_fetch_result = None
     documents = []
     if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
@@ -134,16 +136,18 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         if dart_fetch_result.get("status") == "ok":
             documents = search_external_docs(question, company.company_name, limit=5)
 
-    insight_lines = _build_insights(metrics, documents)
-    evidence_lines = _build_evidence_based_explanation(metrics, documents)
+    insight_lines = [] if ratio_series else _build_insights(metrics, documents)
+    evidence_lines = [] if ratio_series else _build_evidence_based_explanation(metrics, documents)
 
     steps = [
         f"조회 대상: {company.company_name}({company.stock_code}), {period.start_year}~{period.end_year}년",
         f"기간 해석: {period.source}",
-        _format_series_table(series, account_keys),
+        _format_ratio_series_table(ratio_series) if ratio_series else _format_series_table(series, account_keys),
     ]
     if metrics:
         steps.append("계산 요약: " + " | ".join(_format_metric(metric) for metric in metrics))
+    if ratio_series:
+        steps.extend(_build_ratio_insights(ratio_series))
     steps.extend(insight_lines)
     steps.extend(evidence_lines)
     if documents:
@@ -155,7 +159,10 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     else:
         steps.append("재무제표 패턴을 중심으로 해석했습니다.")
 
-    summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 추이를 분석했습니다."
+    if ratio_series:
+        summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 수익성 비율 추이를 분석했습니다."
+    else:
+        summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 추이를 분석했습니다."
     if news_requested and not documents:
         summary = f"{company.company_name}의 최근 주가 변동 원인은 뉴스 근거 확보 후 판단해야 합니다."
 
@@ -167,6 +174,7 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         "period": period.__dict__,
         "accounts": account_keys,
         "series": series,
+        "ratio_series": ratio_series,
         "metrics": metrics,
         "external_references": documents,
         "dart_fetch": dart_fetch_result,
@@ -412,7 +420,15 @@ def _clip_period(start_year: int, end_year: int, available_years: list[int], sou
     return Period(max(start_year, min_year), min(end_year, max_year), source)
 
 
-def _extract_accounts(question: str) -> list[str]:
+def _extract_accounts(question: str, ratio_keys: list[str] | None = None) -> list[str]:
+    if ratio_keys:
+        required = ["revenue"]
+        if "operating_margin" in ratio_keys:
+            required.append("operating_income")
+        if "net_margin" in ratio_keys:
+            required.append("net_income")
+        return required
+
     account_keys = []
     patterns = [
         ("revenue", ["매출", "영업수익", "revenue"]),
@@ -428,6 +444,73 @@ def _extract_accounts(question: str) -> list[str]:
         if any(token in lowered for token in tokens):
             account_keys.append(account_key)
     return account_keys or ["revenue", "operating_income", "net_income"]
+
+
+def _extract_ratio_accounts(question: str) -> list[str]:
+    compact = question.replace(" ", "").lower()
+    ratio_keys = []
+    if any(token in compact for token in ["매출액영업이익률", "영업이익률", "영업마진", "operatingmargin"]):
+        ratio_keys.append("operating_margin")
+    if any(token in compact for token in ["매출액순이익률", "순이익률", "순이익마진", "netmargin"]):
+        ratio_keys.append("net_margin")
+    if any(token in compact for token in ["매출액이익률", "이익률추이", "수익성비율", "profitmargin"]) and not ratio_keys:
+        ratio_keys.extend(["operating_margin", "net_margin"])
+    return ratio_keys
+
+
+def _build_ratio_series(series: list[dict[str, Any]], ratio_keys: list[str]) -> list[dict[str, Any]]:
+    if not ratio_keys:
+        return []
+    rows = []
+    for row in series:
+        revenue = row.get("revenue", {}).get("amount")
+        if not revenue:
+            continue
+        ratio_row: dict[str, Any] = {"year": row["year"]}
+        if "operating_margin" in ratio_keys and row.get("operating_income"):
+            ratio_row["operating_margin"] = {
+                "label": "매출액영업이익률",
+                "value": row["operating_income"]["amount"] / revenue,
+                "display": _format_ratio(row["operating_income"]["amount"] / revenue),
+            }
+        if "net_margin" in ratio_keys and row.get("net_income"):
+            ratio_row["net_margin"] = {
+                "label": "매출액순이익률",
+                "value": row["net_income"]["amount"] / revenue,
+                "display": _format_ratio(row["net_income"]["amount"] / revenue),
+            }
+        if len(ratio_row) > 1:
+            rows.append(ratio_row)
+    return rows
+
+
+def _format_ratio_series_table(ratio_series: list[dict[str, Any]]) -> str:
+    rows = []
+    for row in ratio_series:
+        values = []
+        for key in ["operating_margin", "net_margin"]:
+            item = row.get(key)
+            if item:
+                values.append(f"{item['label']} {item['display']}")
+        rows.append(f"{row['year']}년: " + ", ".join(values))
+    return "연도별 수익성 비율: " + " / ".join(rows)
+
+
+def _build_ratio_insights(ratio_series: list[dict[str, Any]]) -> list[str]:
+    insights = []
+    for key in ["operating_margin", "net_margin"]:
+        values = [row[key] | {"year": row["year"]} for row in ratio_series if row.get(key)]
+        if len(values) < 2:
+            continue
+        first = values[0]
+        last = values[-1]
+        diff = last["value"] - first["value"]
+        direction = "상승" if diff > 0 else "하락" if diff < 0 else "유지"
+        insights.append(
+            f"인사이트: {last['label']}은 {first['year']}년 {first['display']}에서 "
+            f"{last['year']}년 {last['display']}로 {direction}했습니다."
+        )
+    return insights
 
 
 def _build_metric_summary(series: list[dict[str, Any]], account_keys: list[str]) -> list[dict[str, Any]]:

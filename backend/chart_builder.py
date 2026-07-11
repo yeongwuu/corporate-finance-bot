@@ -23,10 +23,16 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
         return _build_account_bar_chart(calculation)
     if tool_name == "forecast_tool":
         return _build_forecast_chart(calculation)
+    if tool_name == "stock_price_tool":
+        return _build_stock_price_chart(calculation)
     return None
 
 
 def _build_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    ratio_chart = _build_ratio_trend_chart(calculation)
+    if ratio_chart:
+        return ratio_chart
+
     series_rows = calculation.get("series") or []
     account_keys = calculation.get("accounts") or []
     if len(series_rows) < 2 or not account_keys:
@@ -62,6 +68,46 @@ def _build_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
         "title": f"{company.get('company_name', '기업')} 재무 추이",
         "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
         "unit": "KRW",
+        "datasets": datasets,
+    }
+
+
+def _build_ratio_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    ratio_rows = calculation.get("ratio_series") or []
+    if len(ratio_rows) < 2:
+        return None
+
+    datasets = []
+    for ratio_key in ["operating_margin", "net_margin"]:
+        points = []
+        label = None
+        for row in ratio_rows:
+            item = row.get(ratio_key)
+            if not item:
+                continue
+            label = item.get("label") or ratio_key
+            value = float(item["value"]) * 100
+            points.append(
+                {
+                    "x": int(row["year"]),
+                    "y": value,
+                    "label": f"{row['year']}년",
+                    "display": f"{value:.2f}%",
+                }
+            )
+        if len(points) >= 2:
+            datasets.append({"key": ratio_key, "label": label, "points": points})
+
+    if not datasets:
+        return None
+
+    company = calculation.get("company") or {}
+    period = calculation.get("period") or {}
+    return {
+        "type": "line",
+        "title": f"{company.get('company_name', '기업')} 수익성 비율 추이",
+        "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
+        "unit": "PERCENT",
         "datasets": datasets,
     }
 
@@ -118,6 +164,37 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
         "label": f"{target_year}년 전망",
         "display": _format_amount(float(forecast["base"])),
         "forecast": True,
+    }
+
+
+def _build_stock_price_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    prices = calculation.get("prices") or []
+    if len(prices) < 2:
+        return None
+
+    company = calculation.get("company") or {}
+    period = calculation.get("period") or {}
+    points = [
+        {
+            "x": int(index),
+            "y": float(point["close"]),
+            "label": point["date"],
+            "display": point["display"],
+        }
+        for index, point in enumerate(prices)
+    ]
+    return {
+        "type": "line",
+        "title": f"{company.get('company_name', '기업')} 주가 추이",
+        "subtitle": f"{period.get('label', '')}, 종가 기준",
+        "unit": "KRW_PRICE",
+        "datasets": [
+            {
+                "key": "close",
+                "label": "종가",
+                "points": points,
+            }
+        ],
     }
     company = calculation.get("company") or {}
     account_label = calculation.get("account_label") or "재무지표"

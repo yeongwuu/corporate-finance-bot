@@ -95,6 +95,7 @@ export default function ChatUI() {
             status: data.calculation?.status,
             references: data.references?.length || 0,
             chart: data.chart,
+            trace: data.trace || [],
           },
         },
       ]);
@@ -252,6 +253,9 @@ function MessageText({ message }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [isFolded, setIsFolded] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
+  const isInitialAssistantMessage = message.role === "assistant" && message.meta?.tool === "ready";
+  const trace = message.meta?.trace || [];
 
   useEffect(() => {
     if (!message.meta?.animate) {
@@ -295,40 +299,71 @@ function MessageText({ message }) {
         <>
           <div className="message-body">{formatAnswerText(visibleText)}</div>
           <ChartPanel chart={message.meta?.chart} compact />
+          {trace.length > 0 ? <TracePanel trace={trace} isOpen={showTrace} /> : null}
         </>
       )}
-      <div className="message-actions" aria-label="답변 작업">
-        <button
-          type="button"
-          onClick={() => setIsFolded(!isFolded)}
-          aria-label={isFolded ? "답변 펼치기" : "답변 접기"}
-          title={isFolded ? "답변 펼치기" : "답변 접기"}
-        >
-          {isFolded ? "펼치기" : "접기"}
-        </button>
-        <button type="button" onClick={copyMessage} aria-label="답변 복사" title="답변 복사">
-          {copied ? "Copied" : "Copy"}
-        </button>
-        <button
-          type="button"
-          className={feedback === "up" ? "active" : undefined}
-          onClick={() => setFeedback(feedback === "up" ? null : "up")}
-          aria-label="좋아요"
-          title="좋아요"
-        >
-          👍
-        </button>
-        <button
-          type="button"
-          className={feedback === "down" ? "active" : undefined}
-          onClick={() => setFeedback(feedback === "down" ? null : "down")}
-          aria-label="비추천"
-          title="비추천"
-        >
-          👎
-        </button>
-      </div>
+      {!isInitialAssistantMessage ? (
+        <div className="message-actions" aria-label="답변 작업">
+          {trace.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowTrace(!showTrace)}
+              aria-label={showTrace ? "처리 과정 숨기기" : "처리 과정 보기"}
+              title={showTrace ? "처리 과정 숨기기" : "처리 과정 보기"}
+            >
+              과정
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setIsFolded(!isFolded)}
+            aria-label={isFolded ? "답변 펼치기" : "답변 접기"}
+            title={isFolded ? "답변 펼치기" : "답변 접기"}
+          >
+            {isFolded ? "펼치기" : "접기"}
+          </button>
+          <button type="button" onClick={copyMessage} aria-label="답변 복사" title="답변 복사">
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button
+            type="button"
+            className={feedback === "up" ? "active" : undefined}
+            onClick={() => setFeedback(feedback === "up" ? null : "up")}
+            aria-label="좋아요"
+            title="좋아요"
+          >
+            👍
+          </button>
+          <button
+            type="button"
+            className={feedback === "down" ? "active" : undefined}
+            onClick={() => setFeedback(feedback === "down" ? null : "down")}
+            aria-label="비추천"
+            title="비추천"
+          >
+            👎
+          </button>
+        </div>
+      ) : null}
     </>
+  );
+}
+
+function TracePanel({ trace, isOpen }) {
+  if (!isOpen) return null;
+  return (
+    <div className="trace-panel" aria-label="백엔드 처리 과정">
+      <strong>처리 과정</strong>
+      <ol>
+        {trace.map((item, index) => (
+          <li key={`${item.label}-${index}`}>
+            <span>{item.label}</span>
+            <p>{item.detail}</p>
+            <em>{item.elapsed_ms}ms</em>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -513,18 +548,18 @@ function LineChart({ chart }) {
   const yRange = maxY - minY || 1;
   const xRange = maxX - minX || 1;
   const yTicks = [0, 0.5, 1].map((ratio) => minY + yRange * ratio);
-  const xTicks = Array.from(new Set(xValues)).sort((a, b) => a - b);
+  const xTicks = buildXTicks(allPoints);
 
   const scaleX = (value) => padding.left + ((value - minX) / xRange) * (width - padding.left - padding.right);
   const scaleY = (value) => height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
 
   return (
-    <div>
+    <div className="line-chart">
       <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
         {yTicks.map((tick) => (
           <g key={tick}>
             <line className="chart-grid" x1={padding.left} y1={scaleY(tick)} x2={width - padding.right} y2={scaleY(tick)} />
-            <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">{formatChartValue(tick)}</text>
+            <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">{formatChartValue(tick, chart.unit)}</text>
           </g>
         ))}
         <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} />
@@ -550,8 +585,8 @@ function LineChart({ chart }) {
             </g>
           );
         })}
-        {xTicks.map((year) => (
-          <text key={year} x={scaleX(year)} y={height - 10} textAnchor="middle">{year}</text>
+        {xTicks.map((tick) => (
+          <text key={`${tick.x}-${tick.label}`} x={scaleX(tick.x)} y={height - 10} textAnchor="middle">{tick.label}</text>
         ))}
       </svg>
       <div className="chart-legend">
@@ -566,7 +601,23 @@ function LineChart({ chart }) {
   );
 }
 
-function formatChartValue(value) {
+function buildXTicks(points) {
+  const unique = [];
+  const seen = new Set();
+  for (const point of points) {
+    if (seen.has(point.x)) continue;
+    seen.add(point.x);
+    unique.push({ x: point.x, label: point.label || String(point.x) });
+  }
+  unique.sort((a, b) => a.x - b.x);
+  if (unique.length <= 7) return unique;
+  const middle = unique[Math.floor(unique.length / 2)];
+  return [unique[0], middle, unique[unique.length - 1]];
+}
+
+function formatChartValue(value, unit) {
+  if (unit === "PERCENT") return `${value.toFixed(1)}%`;
+  if (unit === "KRW_PRICE") return `${Math.round(value).toLocaleString("ko-KR")}원`;
   const abs = Math.abs(value);
   if (abs >= 1_0000_0000_0000) return `${(value / 1_0000_0000_0000).toFixed(0)}조`;
   if (abs >= 1_0000_0000) return `${(value / 1_0000_0000).toFixed(0)}억`;

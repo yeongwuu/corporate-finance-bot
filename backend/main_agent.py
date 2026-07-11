@@ -1,3 +1,5 @@
+import time
+
 from chart_builder import build_chart_spec
 from llm_client import build_final_answer
 from rag.simple_rag import search_knowledge
@@ -11,26 +13,51 @@ from tools.forecast_tool import forecast_company_metric
 from tools.mergers_acquisitions_tool import analyze_mergers_acquisitions
 from tools.portfolio_tool import analyze_portfolio
 from tools.risk_utility_tool import analyze_risk_utility
+from tools.stock_price_tool import analyze_stock_price
 from tools.time_value_tool import analyze_time_value
 from tools.valuation_tool import analyze_valuation
 from tools.working_capital_tool import analyze_working_capital
 
 
 def answer_finance_question(question: str, history: list[dict] | None = None) -> dict:
+    started_at = time.perf_counter()
+    trace = []
     context_text = _build_context_text(history or [])
+    if context_text:
+        trace.append(_trace_item("이전 질문 맥락 확인", "후속 질문 해석에 사용할 최근 사용자 질문을 반영했습니다.", started_at))
     effective_question = _with_context(question, context_text)
+
+    step_started = time.perf_counter()
     tool_name = select_tool(effective_question)
+    trace.append(_trace_item("분석 도구 선택", _tool_description(tool_name), step_started))
+
+    step_started = time.perf_counter()
     knowledge_references = search_knowledge(effective_question)
+    trace.append(_trace_item("재무 지식 검색", f"관련 기준 문서 {len(knowledge_references)}건을 확인했습니다.", step_started))
+
+    step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)
+    trace.append(_trace_item("데이터 분석 실행", _calculation_description(calculation), step_started))
     if context_text and isinstance(calculation, dict):
         calculation["conversation_context"] = context_text
+
+    step_started = time.perf_counter()
     references = _combined_references(calculation, knowledge_references)
+    trace.append(_trace_item("근거 병합", f"뉴스/공시/지식 근거 {len(references)}건을 답변 후보로 정리했습니다.", step_started))
+
+    step_started = time.perf_counter()
     answer = build_final_answer(
         question=question,
         tool_name=tool_name,
         calculation=calculation,
         references=references,
     )
+    trace.append(_trace_item("답변 생성", "계산 결과와 근거를 사용자 답변 문장으로 정리했습니다.", step_started))
+
+    step_started = time.perf_counter()
+    chart = build_chart_spec(tool_name, calculation)
+    trace.append(_trace_item("그래프 구성", "표시할 그래프를 생성했습니다." if chart else "표시할 그래프가 필요한 질문은 아니었습니다.", step_started))
+    trace.append(_trace_item("전체 처리 완료", f"총 {((time.perf_counter() - started_at) * 1000):.0f}ms가 걸렸습니다.", started_at))
 
     return {
         "question": question,
@@ -38,8 +65,52 @@ def answer_finance_question(question: str, history: list[dict] | None = None) ->
         "answer": answer,
         "calculation": calculation,
         "references": references,
-        "chart": build_chart_spec(tool_name, calculation),
+        "chart": chart,
+        "trace": trace,
     }
+
+
+def _trace_item(label: str, detail: str, started_at: float) -> dict:
+    return {
+        "label": label,
+        "detail": detail,
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000),
+    }
+
+
+def _tool_description(tool_name: str) -> str:
+    descriptions = {
+        "company_trend_tool": "기업 재무 추이와 최신 뉴스 흐름을 함께 보는 경로를 선택했습니다.",
+        "company_analysis_tool": "기업 재무제표 주요 계정을 조회하는 경로를 선택했습니다.",
+        "forecast_tool": "최근 재무 추이를 바탕으로 단순 전망을 계산하는 경로를 선택했습니다.",
+        "financial_ratio_tool": "재무비율 계산 경로를 선택했습니다.",
+        "valuation_tool": "기업가치평가 관련 경로를 선택했습니다.",
+        "capital_budgeting_tool": "투자안 평가 관련 경로를 선택했습니다.",
+        "portfolio_tool": "포트폴리오 분석 경로를 선택했습니다.",
+        "cost_of_capital_tool": "자본비용 분석 경로를 선택했습니다.",
+        "mergers_acquisitions_tool": "M&A 분석 경로를 선택했습니다.",
+        "time_value_tool": "화폐의 시간가치 계산 경로를 선택했습니다.",
+        "rag_only": "계산 도구 없이 재무 지식 검색 중심 경로를 선택했습니다.",
+    }
+    return descriptions.get(tool_name, f"{tool_name} 경로를 선택했습니다.")
+
+
+def _calculation_description(calculation: dict) -> str:
+    status = calculation.get("status", "unknown")
+    company = calculation.get("company") or {}
+    company_name = company.get("company_name")
+    news_fetch = calculation.get("news_fetch") or {}
+    parts = [f"상태: {status}"]
+    if company_name:
+        parts.append(f"기업: {company_name}")
+    if calculation.get("period"):
+        period = calculation["period"]
+        parts.append(f"기간: {period.get('start_year')}~{period.get('end_year')}")
+    if calculation.get("target_year"):
+        parts.append(f"전망연도: {calculation.get('target_year')}")
+    if news_fetch.get("status"):
+        parts.append(f"뉴스: {news_fetch.get('status')}")
+    return ", ".join(parts)
 
 
 def _build_context_text(history: list[dict]) -> str:
@@ -89,6 +160,9 @@ def select_tool(question: str) -> str:
 
     if _is_forecast_question(normalized):
         return "forecast_tool"
+
+    if _is_stock_price_question(normalized):
+        return "stock_price_tool"
 
     if _is_market_news_question(normalized):
         return "company_trend_tool"
@@ -405,6 +479,31 @@ def _is_forecast_question(normalized: str) -> bool:
     return any(term in normalized for term in forecast_terms) and any(term in normalized for term in metric_terms)
 
 
+def _is_stock_price_question(normalized: str) -> bool:
+    if not any(term in normalized for term in ["주가", "종가", "가격", "수익률"]):
+        return False
+    analysis_terms = [
+        "그래프",
+        "차트",
+        "추이",
+        "과거",
+        "평균",
+        "표준편차",
+        "변동성",
+        "백테스트",
+        "백테스팅",
+        "수익률",
+        "mdd",
+        "최대낙폭",
+        "최근 1년",
+        "최근 6개월",
+        "최근 3개월",
+        "최근 5년",
+    ]
+    reason_terms = ["왜", "이유", "원인", "배경", "호재", "악재", "뉴스", "기사"]
+    return any(term in normalized for term in analysis_terms) and not any(term in normalized for term in reason_terms)
+
+
 def run_tool(tool_name: str, question: str) -> dict:
     if tool_name == "capital_budgeting_tool":
         return analyze_capital_budgeting(question)
@@ -426,6 +525,8 @@ def run_tool(tool_name: str, question: str) -> dict:
         return analyze_portfolio(question)
     if tool_name == "risk_utility_tool":
         return analyze_risk_utility(question)
+    if tool_name == "stock_price_tool":
+        return analyze_stock_price(question)
     if tool_name == "time_value_tool":
         return analyze_time_value(question)
     if tool_name == "valuation_tool":
