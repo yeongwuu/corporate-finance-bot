@@ -267,6 +267,144 @@ h2 {
   margin: 18px 0 24px;
 }
 
+.chart-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.chart-title {
+  display: grid;
+  gap: 4px;
+}
+
+.chart-title strong {
+  font-size: 13px;
+}
+
+.chart-title span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chart-svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart-svg line {
+  stroke: #d8cec5;
+  stroke-width: 1;
+}
+
+.chart-svg path {
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-svg circle {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.chart-svg text {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
+.chart-line.line-0,
+.legend-swatch.line-0 {
+  stroke: var(--accent);
+  background: var(--accent);
+}
+
+.chart-line.line-1,
+.legend-swatch.line-1 {
+  stroke: #eb8c00;
+  background: #eb8c00;
+}
+
+.chart-line.line-2,
+.legend-swatch.line-2 {
+  stroke: #7d3f16;
+  background: #7d3f16;
+}
+
+.chart-line.line-3,
+.legend-swatch.line-3 {
+  stroke: #b33a2b;
+  background: #b33a2b;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.bar-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 5px 8px;
+  align-items: center;
+}
+
+.bar-row span,
+.bar-row strong {
+  font-size: 11px;
+}
+
+.bar-row span {
+  color: #27323a;
+}
+
+.bar-row strong {
+  grid-column: 2;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.bar-track {
+  height: 9px;
+  overflow: hidden;
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #eb8c00);
+  border-radius: inherit;
+}
+
 .reference-list {
   display: grid;
   gap: 12px;

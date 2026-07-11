@@ -65,16 +65,23 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         }
 
     metrics = _build_metric_summary(series, account_keys)
-    documents = search_external_docs(question, company.company_name, limit=5)
+    news_requested = _should_fetch_news(question)
+    documents = [] if news_requested else search_external_docs(question, company.company_name, limit=5)
     dart_fetch_result = None
     news_fetch_result = None
-    if not documents and load_dart_api_key():
+    if news_requested:
+        if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+            news_fetch_result = _try_fetch_news(company, question)
+            if news_fetch_result.get("status") == "ok":
+                documents = search_external_docs(question, company.company_name, limit=5)
+        else:
+            news_fetch_result = {
+                "status": "missing_config",
+                "message": "최근 주가/뉴스 원인 분석에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+            }
+    if not documents and not news_requested and load_dart_api_key():
         dart_fetch_result = _try_fetch_dart_report(company, period.end_year)
         if dart_fetch_result.get("status") == "ok":
-            documents = search_external_docs(question, company.company_name, limit=5)
-    if _should_fetch_news(question) and get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
-        news_fetch_result = _try_fetch_news(company, question)
-        if news_fetch_result.get("status") == "ok":
             documents = search_external_docs(question, company.company_name, limit=5)
 
     insight_lines = _build_insights(metrics, documents)
@@ -98,9 +105,13 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     else:
         steps.append("RAG 근거 후보: 저장된 사업보고서/뉴스 텍스트가 없어 재무제표 패턴 기반으로만 해석했습니다.")
 
+    summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 추이를 분석했습니다."
+    if news_requested and not documents:
+        summary = f"{company.company_name}의 최근 주가 변동 원인은 뉴스 근거 확보 후 판단해야 합니다."
+
     return {
         "status": "ok",
-        "summary": f"{company.company_name}의 {period.start_year}~{period.end_year}년 추이를 분석했습니다.",
+        "summary": summary,
         "steps": steps,
         "company": company.__dict__,
         "period": period.__dict__,
@@ -147,7 +158,27 @@ def _try_fetch_dart_report(company: Any, fiscal_year: int) -> dict[str, Any]:
 
 
 def _should_fetch_news(question: str) -> bool:
-    return any(token in question.lower() for token in ["뉴스", "기사", "최근 이슈", "시장 반응", "업황"])
+    lowered = question.lower()
+    return any(
+        token in lowered
+        for token in [
+            "뉴스",
+            "기사",
+            "최근 이슈",
+            "시장 반응",
+            "업황",
+            "주가",
+            "주식",
+            "상승",
+            "하락",
+            "급등",
+            "급락",
+            "강세",
+            "약세",
+            "호재",
+            "악재",
+        ]
+    )
 
 
 def _try_fetch_news(company: Any, question: str) -> dict[str, Any]:
@@ -158,7 +189,7 @@ def _try_fetch_news(company: Any, question: str) -> dict[str, Any]:
     except Exception as exc:
         return {
             "status": "error",
-            "message": f"뉴스 자동 수집 실패: {exc}",
+            "message": "뉴스 API 호출에 실패했습니다. 배포 환경의 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 설정과 외부 네트워크 연결을 확인해야 합니다.",
         }
 
 

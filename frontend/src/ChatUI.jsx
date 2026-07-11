@@ -7,8 +7,7 @@ const API_URL =
 
 const INITIAL_MESSAGE = {
   role: "assistant",
-  content:
-    "재무관리 질문을 입력하면 관련 이론을 검색하고 계산 도구를 선택해 답변합니다.",
+  content: "안녕하세요. 기업재무 챗봇입니다. 무엇이 궁금하세요?",
   meta: {
     tool: "ready",
     status: "ok",
@@ -129,7 +128,7 @@ export default function ChatUI() {
       <aside className="sidebar">
         <div>
           <p className="eyebrow">Corporate Finance Bot</p>
-          <h1>재무관리 챗봇</h1>
+          <h1>Finance Insight Chatbot</h1>
         </div>
 
         <div className="status-panel">
@@ -151,7 +150,6 @@ export default function ChatUI() {
             <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
               <div className="message-header">
                 <strong>{message.role === "user" ? "User" : "Assistant"}</strong>
-                {message.meta?.tool ? <span>{message.meta.tool}</span> : null}
               </div>
               <p>{message.content}</p>
             </article>
@@ -194,7 +192,7 @@ export default function ChatUI() {
                 sendMessage();
               }
             }}
-            placeholder="재무관리 질문을 입력하세요"
+            placeholder="이곳에 질문을 입력하세요!"
             rows={3}
           />
           <button
@@ -225,6 +223,8 @@ export default function ChatUI() {
           </div>
         </dl>
 
+        <ChartPanel chart={lastResult?.chart} />
+
         <div className="reference-list">
           {(lastResult?.references || []).slice(0, 4).map((reference, index) => (
             <section key={`${reference.title}-${index}`}>
@@ -235,5 +235,89 @@ export default function ChatUI() {
         </div>
       </aside>
     </main>
+  );
+}
+
+function ChartPanel({ chart }) {
+  if (!chart) return null;
+  return (
+    <section className="chart-card">
+      <div className="chart-title">
+        <strong>{chart.title}</strong>
+        {chart.subtitle ? <span>{chart.subtitle}</span> : null}
+      </div>
+      {chart.type === "line" ? <LineChart chart={chart} /> : null}
+      {chart.type === "bar" ? <BarChart chart={chart} /> : null}
+    </section>
+  );
+}
+
+function LineChart({ chart }) {
+  const width = 260;
+  const height = 170;
+  const padding = 26;
+  const allPoints = chart.datasets.flatMap((dataset) => dataset.points);
+  const xValues = allPoints.map((point) => point.x);
+  const yValues = allPoints.map((point) => point.y);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minY = Math.min(...yValues);
+  const maxY = Math.max(...yValues);
+  const yRange = maxY - minY || 1;
+  const xRange = maxX - minX || 1;
+
+  const scaleX = (value) => padding + ((value - minX) / xRange) * (width - padding * 2);
+  const scaleY = (value) => height - padding - ((value - minY) / yRange) * (height - padding * 2);
+
+  return (
+    <div>
+      <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
+        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
+        <line x1={padding} y1={padding} x2={padding} y2={height - padding} />
+        {chart.datasets.map((dataset, index) => {
+          const path = dataset.points
+            .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${scaleX(point.x)} ${scaleY(point.y)}`)
+            .join(" ");
+          return (
+            <g key={dataset.key}>
+              <path className={`chart-line line-${index % 4}`} d={path} />
+              {dataset.points.map((point) => (
+                <circle key={`${dataset.key}-${point.x}`} cx={scaleX(point.x)} cy={scaleY(point.y)} r="3.2">
+                  <title>{`${dataset.label} ${point.label}: ${point.display}`}</title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+        {[minX, maxX].map((year) => (
+          <text key={year} x={scaleX(year)} y={height - 6} textAnchor="middle">{year}</text>
+        ))}
+      </svg>
+      <div className="chart-legend">
+        {chart.datasets.map((dataset, index) => (
+          <span key={dataset.key}>
+            <i className={`legend-swatch line-${index % 4}`} />
+            {dataset.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BarChart({ chart }) {
+  const maxValue = Math.max(...chart.bars.map((bar) => Math.abs(bar.value)), 1);
+  return (
+    <div className="bar-chart">
+      {chart.bars.map((bar) => (
+        <div className="bar-row" key={bar.key}>
+          <span>{bar.label}</span>
+          <div className="bar-track">
+            <div className="bar-fill" style={{ width: `${Math.max(4, (Math.abs(bar.value) / maxValue) * 100)}%` }} />
+          </div>
+          <strong>{bar.display}</strong>
+        </div>
+      ))}
+    </div>
   );
 }

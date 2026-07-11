@@ -42,6 +42,8 @@ def search_external_docs(query: str, company_name: str | None = None, limit: int
         if path.name.startswith("_"):
             continue
         text = path.read_text(encoding="utf-8")
+        if company_name and not _document_matches_company(path, text, company_name):
+            continue
         metadata = parse_metadata(text)
         for chunk_index, chunk in enumerate(chunk_text(text)):
             score = score_chunk(chunk, terms, company_name)
@@ -122,3 +124,10 @@ def score_chunk(chunk: str, terms: list[str], company_name: str | None) -> int:
     if business_score <= 0:
         return 0
     return score
+
+
+def _document_matches_company(path: Path, text: str, company_name: str) -> bool:
+    compact_company = re.sub(r"\s+", "", company_name.lower())
+    compact_path = re.sub(r"\s+", "", path.stem.lower())
+    compact_head = re.sub(r"\s+", "", text[:2000].lower())
+    return compact_company in compact_path or compact_company in compact_head

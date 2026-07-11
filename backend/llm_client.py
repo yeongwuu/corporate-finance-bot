@@ -18,38 +18,53 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
     if provider == "openai":
         try:
             return build_openai_answer(question, tool_name, calculation, references)
-        except Exception as exc:
-            fallback = build_rule_based_answer(tool_name, calculation, references)
-            return f"{fallback}\n\nLLM 해석 레이어 오류: {exc}"
+        except Exception:
+            return build_rule_based_answer(tool_name, calculation, references)
     if provider == "gemini":
         try:
             return build_gemini_answer(question, tool_name, calculation, references)
-        except Exception as exc:
-            fallback = build_rule_based_answer(tool_name, calculation, references)
-            return f"{fallback}\n\nLLM 해석 레이어 오류: {exc}"
+        except Exception:
+            return build_rule_based_answer(tool_name, calculation, references)
     return build_rule_based_answer(tool_name, calculation, references)
 
 
 def build_rule_based_answer(tool_name: str, calculation: dict, references: list[dict]) -> str:
-    lines = [
-        f"사용 도구: {tool_name}",
-        "",
-        calculation.get("summary", calculation.get("message", "계산 결과가 없습니다.")),
-    ]
+    summary = calculation.get("summary") or calculation.get("message") or "질문을 해석했지만 충분한 계산 결과를 찾지 못했습니다."
+    paragraphs = [summary]
 
     steps = calculation.get("steps", [])
     if steps:
-        lines.append("")
-        lines.append("계산 과정")
-        lines.extend(f"- {step}" for step in steps)
+        narrative_steps = [_clean_step(step) for step in steps if _clean_step(step)]
+        if narrative_steps:
+            paragraphs.append(" ".join(narrative_steps[:5]))
 
     if references:
-        lines.append("")
-        lines.append("참고 기준")
-        for reference in references[:3]:
-            lines.append(f"- {reference['title']}: {reference['snippet']}")
+        paragraphs.append("관련 재무 기준과 내부 지식 문서도 함께 확인해 답변했습니다.")
 
-    return "\n".join(lines)
+    return "\n\n".join(paragraphs)
+
+
+def _clean_step(step: str) -> str:
+    cleaned = str(step).strip()
+    prefixes = [
+        "조회 대상:",
+        "시장/업종:",
+        "주요계정:",
+        "간단 분석:",
+        "계산 요약:",
+        "기간 해석:",
+        "RAG 근거 후보:",
+    ]
+    if cleaned.startswith("데이터 원천:"):
+        return ""
+    for prefix in prefixes:
+        if cleaned.startswith(prefix):
+            cleaned = cleaned.replace(prefix, "", 1).strip()
+            break
+    cleaned = cleaned.replace(" | ", ", ")
+    if cleaned and cleaned[-1] not in ".!?。":
+        cleaned = f"{cleaned}."
+    return cleaned
 
 
 def build_openai_answer(question: str, tool_name: str, calculation: dict, references: list[dict]) -> str:

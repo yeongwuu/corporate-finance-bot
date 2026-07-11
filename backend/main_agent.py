@@ -1,3 +1,4 @@
+from chart_builder import build_chart_spec
 from llm_client import build_final_answer
 from rag.simple_rag import search_knowledge
 from tools.capital_budgeting_tool import analyze_capital_budgeting
@@ -31,12 +32,16 @@ def answer_finance_question(question: str) -> dict:
         "answer": answer,
         "calculation": calculation,
         "references": references,
+        "chart": build_chart_spec(tool_name, calculation),
     }
 
 
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    if _is_market_news_question(normalized):
+        return "company_trend_tool"
 
     if any(word in normalized for word in ["비교기업", "대용기업", "투자안 베타", "프로젝트 베타", "조정현가", "apv", "목표 부채", "부채비율 유지", "이자비용 절세효과의 현재가치", "이자비용 절세효과 현재가치"]):
         return "capital_budgeting_tool"
@@ -277,6 +282,37 @@ def select_tool(question: str) -> str:
     if any(word in normalized for word in ["roe", "roa", "재무비율"]):
         return "financial_ratio_tool"
     return "rag_only"
+
+
+def _is_market_news_question(normalized: str) -> bool:
+    market_terms = [
+        "주가",
+        "주식",
+        "시가총액",
+        "상승",
+        "하락",
+        "급등",
+        "급락",
+        "강세",
+        "약세",
+        "랠리",
+        "반등",
+        "조정",
+    ]
+    reason_terms = [
+        "왜",
+        "이유",
+        "원인",
+        "배경",
+        "분석",
+        "최근",
+        "뉴스",
+        "기사",
+        "이슈",
+        "호재",
+        "악재",
+    ]
+    return any(term in normalized for term in market_terms) and any(term in normalized for term in reason_terms)
 
 
 def run_tool(tool_name: str, question: str) -> dict:
