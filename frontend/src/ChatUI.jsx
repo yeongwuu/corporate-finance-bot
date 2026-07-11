@@ -19,6 +19,7 @@ const INITIAL_MESSAGE = {
 export default function ChatUI() {
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
+  const [attachedFile, setAttachedFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStartedAt, setLoadingStartedAt] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -27,9 +28,10 @@ export default function ChatUI() {
   const [feedbackNotice, setFeedbackNotice] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  const canSubmit = input.trim().length > 0 && !isLoading;
+  const canSubmit = (input.trim().length > 0 || Boolean(attachedFile)) && !isLoading;
 
   useEffect(() => {
     if (!isLoading || !loadingStartedAt) {
@@ -46,21 +48,39 @@ export default function ChatUI() {
     return () => window.clearInterval(timerId);
   }, [isLoading, loadingStartedAt]);
 
+  useEffect(() => {
+    if (!feedbackNotice) return undefined;
+    const timerId = window.setTimeout(() => setFeedbackNotice(""), 5000);
+    return () => window.clearTimeout(timerId);
+  }, [feedbackNotice]);
+
   async function sendMessage(nextInput = input) {
     const question = nextInput.trim();
-    if (!question || isLoading) return;
+    if ((!question && !attachedFile) || isLoading) return;
     const history = buildConversationHistory(messages);
+    const displayQuestion = question || "첨부파일의 문제를 풀어줘";
+    let attachment = null;
+    try {
+      attachment = attachedFile ? await readAttachment(attachedFile) : null;
+    } catch (error) {
+      setFeedbackNotice(error.message || "파일을 읽지 못했습니다.");
+      return;
+    }
 
     const nextMessages = [
       ...messages,
       {
         role: "user",
-        content: question,
+        content: attachment ? `${displayQuestion}\n\n첨부파일: ${attachment.name}` : displayQuestion,
       },
     ];
 
     setMessages(nextMessages);
     setInput("");
+    setAttachedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
     setLoadingStartedAt(Date.now());
     setIsLoading(true);
     const abortController = new AbortController();
@@ -70,7 +90,7 @@ export default function ChatUI() {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, history }),
+        body: JSON.stringify({ question: displayQuestion, history, attachment }),
         signal: abortController.signal,
       });
 
@@ -95,14 +115,15 @@ export default function ChatUI() {
             chart: data.chart,
             trace: data.trace || [],
             suggestions: shouldShowAlternativeQuestions(answer, data)
-              ? buildAlternativeQuestions(question)
+              ? buildAlternativeQuestions(displayQuestion)
               : [],
           },
         },
       ]);
       if (shouldAskFeedbackConsent(data, answer)) {
         setPendingFeedback({
-          question,
+          question: displayQuestion,
+          attachmentName: attachment?.name,
           answer,
           tool: data.tool,
           status: data.calculation?.status,
@@ -125,13 +146,14 @@ export default function ChatUI() {
             animate: true,
             tool: error.name === "AbortError" ? "cancelled" : "network",
             status: error.name === "AbortError" ? "cancelled" : "error",
-            suggestions: error.name === "AbortError" ? [] : buildAlternativeQuestions(question),
+            suggestions: error.name === "AbortError" ? [] : buildAlternativeQuestions(displayQuestion),
           },
         },
       ]);
       if (error.name !== "AbortError") {
         setPendingFeedback({
-          question,
+          question: displayQuestion,
+          attachmentName: attachment?.name,
           answer,
           tool: "network",
           status: "error",
@@ -223,6 +245,14 @@ export default function ChatUI() {
             sendMessage();
           }}
         >
+          {attachedFile ? (
+            <div className="attachment-chip">
+              <span>{attachedFile.name}</span>
+              <button type="button" onClick={() => setAttachedFile(null)} aria-label="첨부파일 제거">
+                삭제
+              </button>
+            </div>
+          ) : null}
           <textarea
             ref={inputRef}
             value={input}
@@ -237,6 +267,16 @@ export default function ChatUI() {
             placeholder="이곳에 질문을 입력하세요!"
             rows={3}
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="file-input"
+            accept=".txt,.md,.csv,.json,.pdf,image/*"
+            onChange={(event) => setAttachedFile(event.target.files?.[0] || null)}
+          />
+          <button type="button" className="attach-button" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+            파일
+          </button>
           <button
             type={isLoading ? "button" : "submit"}
             className={isLoading ? "cancel-button" : undefined}
@@ -459,6 +499,43 @@ function buildConversationHistory(messages) {
       role: message.role,
       content: message.content.slice(0, 900),
     }));
+}
+
+async function readAttachment(file) {
+  const maxBytes = 7 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error("첨부파일은 7MB 이하만 업로드할 수 있습니다.");
+  }
+  const textTypes = ["text/", "application/json", "text/csv", "application/csv"];
+  const isText = textTypes.some((type) => file.type.startsWith(type) || file.type === type) || /\.(txt|md|csv|json)$/i.test(file.name);
+  const base = {
+    name: file.name,
+    type: file.type || inferMimeType(file.name),
+    size: file.size,
+  };
+  if (isText) {
+    return { ...base, text: await file.text() };
+  }
+  const dataUrl = await readFileAsDataUrl(file);
+  const [, data = ""] = dataUrl.split(",", 2);
+  return { ...base, data };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("파일을 읽지 못했습니다."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function inferMimeType(fileName) {
+  if (/\.pdf$/i.test(fileName)) return "application/pdf";
+  if (/\.png$/i.test(fileName)) return "image/png";
+  if (/\.jpe?g$/i.test(fileName)) return "image/jpeg";
+  if (/\.webp$/i.test(fileName)) return "image/webp";
+  return "application/octet-stream";
 }
 
 function buildPreview(content) {

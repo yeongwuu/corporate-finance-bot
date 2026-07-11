@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import urllib.request
 from datetime import date, timedelta
 from typing import Any
 
@@ -29,8 +30,22 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
 
     period = _extract_period(question)
     ticker = _to_yahoo_ticker(company.stock_code, company.market)
+    price_source = "네이버 금융"
     try:
-        frame = _download_price_data(ticker, period["start"], period["end"])
+        frame = _download_naver_price_data(company.stock_code, period["start"], period["end"])
+        if frame.empty:
+            fallback = _download_fallback_naver_price_data(company.stock_code, period)
+            if fallback:
+                frame, period = fallback
+        if frame.empty:
+            frame = _download_price_data(ticker, period["start"], period["end"])
+            if not frame.empty:
+                price_source = "Yahoo Finance"
+        if frame.empty:
+            fallback = _download_fallback_price_data(ticker, period)
+            if fallback:
+                frame, period = fallback
+                price_source = "Yahoo Finance"
     except ImportError:
         return {
             "status": "missing_dependency",
@@ -66,7 +81,7 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
         f"일간 수익률 표준편차는 {stats['daily_return_std_display']}입니다."
     )
     steps = [
-        f"조회 대상: {company.company_name}({company.stock_code}), Yahoo Finance 티커 {ticker}",
+        f"조회 대상: {company.company_name}({company.stock_code}), 가격 데이터 출처 {price_source}",
         f"조회 기간: {period['start']}~{period['end']}",
         f"가격 범위: 시작가 {_format_krw(stats['first_close'])}, 종료가 {_format_krw(stats['last_close'])}",
         f"기간 수익률: {stats['cumulative_return_display']}",
@@ -75,6 +90,11 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
         f"연율화 수익률/변동성: {stats['annualized_return_display']} / {stats['annualized_volatility_display']}",
         f"최대낙폭(MDD): {stats['max_drawdown_display']}",
     ]
+    if period.get("fallback"):
+        steps.insert(
+            2,
+            f"요청 기간({period['requested_start']}~{period['requested_end']}) 데이터가 비어 있어 확인 가능한 과거 구간으로 재조회했습니다.",
+        )
 
     return {
         "status": "ok",
@@ -82,6 +102,7 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
         "steps": steps,
         "company": company.__dict__,
         "ticker": ticker,
+        "price_source": price_source,
         "period": period,
         "prices": prices,
         "stats": stats,
@@ -102,6 +123,101 @@ def _download_price_data(ticker: str, start: date, end: date) -> pd.DataFrame:
     if isinstance(frame.columns, pd.MultiIndex):
         frame.columns = frame.columns.get_level_values(0)
     return frame.dropna(subset=["Close"]) if "Close" in frame else pd.DataFrame()
+
+
+def _download_fallback_price_data(ticker: str, period: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]] | None:
+    duration = max(30, (period["end"] - period["start"]).days)
+    today = date.today()
+    for offset_days in [30, 90, 180, 365, 730]:
+        fallback_end = today - timedelta(days=offset_days)
+        fallback_start = fallback_end - timedelta(days=duration)
+        frame = _download_price_data(ticker, fallback_start, fallback_end)
+        if not frame.empty:
+            fallback_period = {
+                "start": fallback_start,
+                "end": fallback_end,
+                "label": f"최근 확인 가능 {period['label']}",
+                "fallback": True,
+                "requested_start": period["start"],
+                "requested_end": period["end"],
+            }
+            return frame, fallback_period
+    return None
+
+
+def _download_naver_price_data(stock_code: str, start: date, end: date) -> pd.DataFrame:
+    code = stock_code.zfill(6)
+    duration = max(30, (end - start).days)
+    max_pages = min(260, max(20, math.ceil(duration / 7) + 5))
+    rows: list[dict[str, Any]] = []
+
+    for page in range(1, max_pages + 1):
+        page_rows = _fetch_naver_price_page(code, page)
+        if not page_rows:
+            break
+        rows.extend(page_rows)
+        oldest = min(row["date"] for row in page_rows)
+        if oldest < start:
+            break
+
+    filtered = [row for row in rows if start <= row["date"] <= end]
+    if not filtered:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(
+        {"Close": [row["close"] for row in filtered]},
+        index=pd.to_datetime([row["date"] for row in filtered]),
+    )
+    frame = frame[~frame.index.duplicated(keep="last")]
+    return frame.sort_index()
+
+
+def _download_fallback_naver_price_data(
+    stock_code: str, period: dict[str, Any]
+) -> tuple[pd.DataFrame, dict[str, Any]] | None:
+    duration = max(30, (period["end"] - period["start"]).days)
+    today = date.today()
+    for offset_days in [30, 90, 180, 365, 730]:
+        fallback_end = today - timedelta(days=offset_days)
+        fallback_start = fallback_end - timedelta(days=duration)
+        frame = _download_naver_price_data(stock_code, fallback_start, fallback_end)
+        if not frame.empty:
+            fallback_period = {
+                "start": fallback_start,
+                "end": fallback_end,
+                "label": f"최근 확인 가능 {period['label']}",
+                "fallback": True,
+                "requested_start": period["start"],
+                "requested_end": period["end"],
+            }
+            return frame, fallback_period
+    return None
+
+
+def _fetch_naver_price_page(stock_code: str, page: int) -> list[dict[str, Any]]:
+    url = f"https://finance.naver.com/item/sise_day.naver?code={stock_code}&page={page}"
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        html = response.read().decode("euc-kr", errors="ignore")
+
+    rows = []
+    for table_row in re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.S):
+        text = re.sub(r"<[^>]+>", " ", table_row)
+        text = re.sub(r"\s+", " ", text).strip()
+        date_match = re.search(r"(20\d{2})\.(\d{2})\.(\d{2})", text)
+        if not date_match:
+            continue
+        numbers = re.findall(r"\d{1,3}(?:,\d{3})+", text)
+        if not numbers:
+            continue
+        close = float(numbers[0].replace(",", ""))
+        rows.append(
+            {
+                "date": date(int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))),
+                "close": close,
+            }
+        )
+    return rows
 
 
 def _extract_period(question: str) -> dict[str, Any]:
@@ -174,6 +290,8 @@ def _build_backtest_stats(frame: pd.DataFrame) -> dict[str, Any]:
     returns = close.pct_change().dropna()
     first_close = float(close.iloc[0])
     last_close = float(close.iloc[-1])
+    max_close = float(close.max())
+    min_close = float(close.min())
     cumulative_return = (last_close / first_close - 1) if first_close else 0.0
     daily_mean = float(returns.mean()) if not returns.empty else 0.0
     daily_std = float(returns.std()) if len(returns) >= 2 else 0.0
@@ -186,6 +304,8 @@ def _build_backtest_stats(frame: pd.DataFrame) -> dict[str, Any]:
     return {
         "first_close": first_close,
         "last_close": last_close,
+        "max_close": max_close,
+        "min_close": min_close,
         "close_mean": float(close.mean()),
         "close_std": float(close.std()) if len(close) >= 2 else 0.0,
         "daily_return_mean": daily_mean,

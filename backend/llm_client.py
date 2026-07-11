@@ -25,6 +25,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_ratio_trend_answer(calculation)
     if calculation.get("comparison"):
         return build_company_comparison_answer(calculation)
+    if tool_name == "stock_price_tool" and calculation.get("status") == "ok":
+        return build_stock_price_answer(calculation)
     if tool_name == "company_analysis_tool" and calculation.get("status") == "ok":
         return build_company_accounts_answer(calculation)
 
@@ -40,6 +42,50 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         except Exception:
             return build_rule_based_answer(tool_name, calculation, references)
     return build_rule_based_answer(tool_name, calculation, references)
+
+
+def build_attachment_answer(question: str, attachment: dict[str, Any]) -> str:
+    provider = normalize_provider(get_env("LLM_PROVIDER"))
+    prompt = build_attachment_prompt(question, attachment)
+    if provider == "gemini":
+        api_key = get_env("LLM_API_KEY")
+        model = (get_env("LLM_MODEL") or "gemini-3.1-flash-lite").removeprefix("models/")
+        if not api_key:
+            raise ValueError("LLM_API_KEY가 설정되지 않았습니다.")
+        return call_gemini_generate_content(api_key=api_key, model=model, prompt=prompt, attachment=attachment).strip()
+    if provider == "openai":
+        api_key = get_env("LLM_API_KEY")
+        model = get_env("LLM_MODEL")
+        if not api_key:
+            raise ValueError("LLM_API_KEY가 설정되지 않았습니다.")
+        if not model:
+            raise ValueError("LLM_MODEL이 설정되지 않았습니다.")
+        return call_openai_responses(api_key=api_key, model=model, prompt=prompt, attachment=attachment).strip()
+    raise ValueError("파일 문제 풀이는 LLM_PROVIDER와 LLM_API_KEY 설정이 필요합니다.")
+
+
+def build_attachment_prompt(question: str, attachment: dict[str, Any]) -> str:
+    text = attachment.get("text") or ""
+    file_name = attachment.get("name") or "uploaded file"
+    file_type = attachment.get("type") or "unknown"
+    body = (
+        "너는 재무관리/기업재무 문제를 푸는 튜터다.\n"
+        "사용자가 업로드한 파일 또는 이미지의 문제를 읽고, 사용자가 지정한 번호나 조건에 맞춰 답한다.\n\n"
+        "답변 원칙:\n"
+        "1. 사용자가 특정 번호를 지정하면 해당 문제만 먼저 푼다.\n"
+        "2. 계산 문제는 공식, 대입, 계산 결과를 순서대로 보여준다.\n"
+        "3. 이미지/파일에서 문제 문구가 불명확하면 보이는 범위에서 해석한 가정을 먼저 말한다.\n"
+        "4. 수식은 LaTeX 형식으로 작성한다.\n"
+        "5. 답변은 한국어로 간결하게 작성한다.\n\n"
+        f"사용자 질문: {question}\n"
+        f"파일명: {file_name}\n"
+        f"파일 형식: {file_type}\n"
+    )
+    if text:
+        body += f"\n파일 텍스트:\n{text[:12000]}"
+    elif attachment.get("data"):
+        body += "\n파일은 이미지/PDF 바이너리로 첨부되어 있다. 첨부 내용을 직접 읽어 문제를 풀이한다."
+    return body
 
 
 def build_ratio_trend_answer(calculation: dict) -> str:
@@ -168,6 +214,44 @@ def build_company_comparison_answer(calculation: dict) -> str:
                 )
     lines.append("비교 결과는 보유 재무제표 기준이며, 투자 추천이나 목표주가 의견은 아닙니다.")
     return "\n".join(lines)
+
+
+def build_stock_price_answer(calculation: dict) -> str:
+    company = calculation.get("company") or {}
+    stats = calculation.get("stats") or {}
+    period = calculation.get("period") or {}
+    company_name = company.get("company_name", "해당 기업")
+    period_label = period.get("label") or "조회 기간"
+    price_source = calculation.get("price_source") or "Yahoo Finance"
+    lines = [
+        f"{company_name}의 {period_label} 주가 흐름은 {price_source} 종가 기준으로 조회했습니다.",
+    ]
+    if period.get("fallback"):
+        lines.append(
+            f"요청 기간({period.get('requested_start')}~{period.get('requested_end')})의 가격 데이터가 비어 있어 "
+            f"확인 가능한 구간({period.get('start')}~{period.get('end')})으로 재조회했습니다."
+        )
+    if stats:
+        lines.append(
+            f"시작 종가는 {_format_display_price(stats.get('first_close'))}, "
+            f"최근 종가는 {_format_display_price(stats.get('last_close'))}이며, "
+            f"기간 수익률은 {stats.get('cumulative_return_display', '-')}입니다."
+        )
+        lines.append(
+            f"조회 기간의 최저 종가는 {_format_display_price(stats.get('min_close'))}, "
+            f"최고 종가는 {_format_display_price(stats.get('max_close'))}, "
+            f"종가 평균은 {_format_display_price(stats.get('close_mean'))}, "
+            f"종가 표준편차는 {_format_display_price(stats.get('close_std'))}, "
+            f"최대낙폭은 {stats.get('max_drawdown_display', '-')}입니다."
+        )
+    lines.append("아래 그래프는 같은 기간의 종가 추이를 나타냅니다. 투자 추천이나 목표주가 의견은 아닙니다.")
+    return "\n".join(lines)
+
+
+def _format_display_price(value: Any) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value):,.0f}원"
 
 
 def _format_display_amount(amount: float) -> str:
@@ -442,19 +526,27 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
     )
 
 
-def call_openai_responses(api_key: str, model: str, prompt: str) -> str:
+def call_openai_responses(api_key: str, model: str, prompt: str, attachment: dict[str, Any] | None = None) -> str:
     base_url = (get_env("LLM_BASE_URL") or "https://api.openai.com/v1/responses").rstrip("/")
+    content = [
+        {
+            "type": "input_text",
+            "text": prompt,
+        }
+    ]
+    if attachment and _is_image_attachment(attachment) and attachment.get("data"):
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": f"data:{attachment.get('type')};base64,{attachment.get('data')}",
+            }
+        )
     payload = {
         "model": model,
         "input": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": prompt,
-                    }
-                ],
+                "content": content,
             }
         ],
     }
@@ -480,14 +572,24 @@ def call_openai_responses(api_key: str, model: str, prompt: str) -> str:
     return text
 
 
-def call_gemini_generate_content(api_key: str, model: str, prompt: str) -> str:
+def call_gemini_generate_content(api_key: str, model: str, prompt: str, attachment: dict[str, Any] | None = None) -> str:
     base_url = (get_env("LLM_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     url = f"{base_url}/models/{model}:generateContent?key={api_key}"
+    parts = [{"text": prompt}]
+    if attachment and attachment.get("data") and _is_inline_attachment(attachment):
+        parts.append(
+            {
+                "inlineData": {
+                    "mimeType": attachment.get("type") or "application/octet-stream",
+                    "data": attachment.get("data"),
+                }
+            }
+        )
     payload = {
         "contents": [
             {
                 "role": "user",
-                "parts": [{"text": prompt}],
+                "parts": parts,
             }
         ],
         "generationConfig": {
@@ -516,6 +618,15 @@ def call_gemini_generate_content(api_key: str, model: str, prompt: str) -> str:
     if not parts:
         raise RuntimeError("Gemini 응답에서 텍스트를 찾지 못했습니다.")
     return "\n".join(parts)
+
+
+def _is_image_attachment(attachment: dict[str, Any]) -> bool:
+    return str(attachment.get("type") or "").startswith("image/")
+
+
+def _is_inline_attachment(attachment: dict[str, Any]) -> bool:
+    mime_type = str(attachment.get("type") or "")
+    return mime_type.startswith("image/") or mime_type == "application/pdf"
 
 
 def extract_response_text(data: dict[str, Any]) -> str:

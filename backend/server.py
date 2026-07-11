@@ -3,6 +3,7 @@ import os
 import smtplib
 import time
 from email.message import EmailMessage
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -17,6 +18,7 @@ app = FastAPI(title="Corporate Finance Bot API")
 
 logger = logging.getLogger("corporate_finance_bot")
 logging.basicConfig(level=logging.INFO)
+FEEDBACK_LOG_PATH = Path(__file__).resolve().parent / "data" / "feedback_failures.log"
 
 
 def _cors_origins() -> list[str]:
@@ -102,11 +104,13 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     question: str
     history: list[dict[str, str]] = []
+    attachment: dict | None = None
 
 
 class FeedbackEmailRequest(BaseModel):
     question: str
     answer: str
+    attachmentName: str | None = None
     tool: str | None = None
     status: str | None = None
     consent: bool
@@ -119,7 +123,7 @@ def health_check() -> dict:
 
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> dict:
-    return answer_finance_question(request.question, history=request.history)
+    return answer_finance_question(request.question, history=request.history, attachment=request.attachment)
 
 
 @app.post("/api/feedback-email")
@@ -131,7 +135,7 @@ def send_feedback_email(request: FeedbackEmailRequest) -> dict:
         return {"status": "error", "message": "질문과 답변 내용이 필요합니다."}
 
     result = _send_feedback_email(request)
-    status_code = 200 if result["status"] == "ok" else 500
+    status_code = 200 if result["status"] in {"ok", "missing_config"} else 500
     return JSONResponse(status_code=status_code, content=result)
 
 
@@ -145,9 +149,10 @@ def _send_feedback_email(request: FeedbackEmailRequest) -> dict:
     use_tls = os.getenv("SMTP_USE_TLS", "true").lower() != "false"
 
     if not all([host, username, password, from_email]):
+        _write_feedback_fallback(request, "missing_smtp_config")
         return {
             "status": "missing_config",
-            "message": "이메일 전송 환경변수 SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL 설정이 필요합니다.",
+            "message": "SMTP 설정이 없어 이메일은 전송하지 못했지만, 피드백 내용은 서버 로그에 저장했습니다.",
         }
 
     message = EmailMessage()
@@ -161,6 +166,7 @@ def _send_feedback_email(request: FeedbackEmailRequest) -> dict:
                 "",
                 f"Tool: {request.tool or '-'}",
                 f"Status: {request.status or '-'}",
+                f"Attachment: {request.attachmentName or '-'}",
                 "",
                 "[Question]",
                 request.question.strip(),
@@ -179,6 +185,25 @@ def _send_feedback_email(request: FeedbackEmailRequest) -> dict:
             smtp.send_message(message)
     except Exception:
         logger.exception("Feedback email send failed")
-        return {"status": "error", "message": "피드백 이메일 전송에 실패했습니다."}
+        _write_feedback_fallback(request, "smtp_send_failed")
+        return {"status": "error", "message": "피드백 이메일 전송에 실패해 서버 로그에 저장했습니다."}
 
     return {"status": "ok", "message": "피드백 이메일을 전송했습니다."}
+
+
+def _write_feedback_fallback(request: FeedbackEmailRequest, reason: str) -> None:
+    payload = (
+        f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] {reason}\n"
+        f"Tool: {request.tool or '-'}\n"
+        f"Status: {request.status or '-'}\n"
+        f"Attachment: {request.attachmentName or '-'}\n"
+        f"Question: {request.question.strip()}\n"
+        f"Answer: {request.answer.strip()}\n"
+    )
+    logger.warning("Feedback fallback saved reason=%s question=%s", reason, request.question[:120])
+    try:
+        FEEDBACK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with FEEDBACK_LOG_PATH.open("a", encoding="utf-8") as file:
+            file.write(payload)
+    except Exception:
+        logger.exception("Feedback fallback file write failed")

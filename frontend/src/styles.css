@@ -403,13 +403,55 @@ h2 {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 88px;
+  grid-template-columns: minmax(0, 1fr) 72px 88px;
   gap: 10px;
   padding: 12px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 14px 34px rgba(74, 47, 32, 0.09);
+}
+
+.attachment-chip {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  color: #4a2f20;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.attachment-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer .attachment-chip button {
+  min-height: 28px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.file-input {
+  display: none;
+}
+
+.composer .attach-button {
+  background: #27323a;
+}
+
+.composer .attach-button:hover:not(:disabled) {
+  background: #182026;
 }
 
 .composer textarea {

@@ -1,7 +1,7 @@
 import time
 
 from chart_builder import build_chart_spec
-from llm_client import build_final_answer
+from llm_client import build_attachment_answer, build_final_answer
 from rag.simple_rag import search_knowledge
 from tools.capital_budgeting_tool import analyze_capital_budgeting
 from tools.company_analysis_tool import analyze_company_financials
@@ -20,9 +20,12 @@ from tools.valuation_tool import analyze_valuation
 from tools.working_capital_tool import analyze_working_capital
 
 
-def answer_finance_question(question: str, history: list[dict] | None = None) -> dict:
+def answer_finance_question(question: str, history: list[dict] | None = None, attachment: dict | None = None) -> dict:
     started_at = time.perf_counter()
     trace = []
+    if attachment:
+        return answer_attachment_question(question, attachment, started_at)
+
     context_text = _build_context_text(history or []) if _should_use_context(question) else ""
     if context_text:
         trace.append(_trace_item("이전 질문 맥락 확인", "후속 질문 해석에 사용할 최근 사용자 질문을 반영했습니다.", started_at))
@@ -67,6 +70,45 @@ def answer_finance_question(question: str, history: list[dict] | None = None) ->
         "calculation": calculation,
         "references": references,
         "chart": chart,
+        "trace": trace,
+    }
+
+
+def answer_attachment_question(question: str, attachment: dict, started_at: float | None = None) -> dict:
+    started_at = started_at or time.perf_counter()
+    trace = [_trace_item("파일 확인", f"{attachment.get('name', '첨부파일')}을 문제 풀이 입력으로 사용했습니다.", started_at)]
+    calculation = {
+        "status": "ok",
+        "summary": "업로드한 파일을 바탕으로 문제 풀이를 시도했습니다.",
+        "attachment": {
+            "name": attachment.get("name"),
+            "type": attachment.get("type"),
+            "size": attachment.get("size"),
+            "has_text": bool(attachment.get("text")),
+            "has_binary": bool(attachment.get("data")),
+        },
+    }
+    try:
+        step_started = time.perf_counter()
+        answer = build_attachment_answer(question, attachment)
+        trace.append(_trace_item("파일 문제 풀이", "첨부파일과 질문을 함께 해석해 답변했습니다.", step_started))
+    except Exception as exc:
+        calculation["status"] = "missing_config"
+        calculation["message"] = str(exc)
+        answer = (
+            "업로드한 파일을 분석하려면 LLM_PROVIDER, LLM_MODEL, LLM_API_KEY 설정이 필요합니다. "
+            "이미지 문제는 비전 입력을 지원하는 모델을 사용해야 합니다."
+        )
+        trace.append(_trace_item("파일 문제 풀이 실패", str(exc), started_at))
+
+    trace.append(_trace_item("전체 처리 완료", f"총 {((time.perf_counter() - started_at) * 1000):.0f}ms가 걸렸습니다.", started_at))
+    return {
+        "question": question,
+        "tool": "attachment_solver",
+        "answer": answer,
+        "calculation": calculation,
+        "references": [],
+        "chart": None,
         "trace": trace,
     }
 
@@ -129,6 +171,7 @@ def _build_context_text(history: list[dict]) -> str:
 
 def _should_use_context(question: str) -> bool:
     normalized = question.lower().replace(" ", "")
+    token_count = len(question.split())
     independent_terms = [
         "상위",
         "top",
@@ -145,6 +188,29 @@ def _should_use_context(question: str) -> bool:
     ]
     if any(term in normalized for term in independent_terms):
         return False
+
+    period_only_terms = [
+        "최근5개년",
+        "최근3개년",
+        "최근4개년",
+        "최근2개년",
+        "최근1년",
+        "최근5년",
+        "최근3년",
+        "전년대비",
+        "전년보다",
+        "지난5년",
+        "지난3년",
+        "5개년",
+        "3개년",
+        "2021~2025",
+        "2020~2025",
+        "2019~2025",
+    ]
+    if any(term in normalized for term in period_only_terms):
+        return True
+    if token_count <= 4 and any(term in normalized for term in ["최근", "기간", "개년", "연도별", "추이", "성장률"]):
+        return True
 
     follow_up_terms = [
         "그럼",
@@ -538,6 +604,11 @@ def _is_stock_price_question(normalized: str) -> bool:
         "그래프",
         "차트",
         "추이",
+        "흐름",
+        "변동",
+        "변동하였",
+        "변동했",
+        "어떻게",
         "과거",
         "평균",
         "표준편차",
