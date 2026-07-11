@@ -128,7 +128,6 @@ export default function ChatUI() {
       <aside className="sidebar">
         <div>
           <p className="eyebrow">Corporate Finance Bot</p>
-          <h1>Finance Insight Chatbot</h1>
         </div>
 
         <div className="status-panel">
@@ -221,6 +220,10 @@ export default function ChatUI() {
             <dt>근거</dt>
             <dd>{lastResult?.references?.length ?? 0}</dd>
           </div>
+          <div>
+            <dt>뉴스</dt>
+            <dd>{formatNewsStatus(lastResult?.calculation)}</dd>
+          </div>
         </dl>
 
         <ChartPanel chart={lastResult?.chart} />
@@ -236,6 +239,15 @@ export default function ChatUI() {
       </aside>
     </main>
   );
+}
+
+function formatNewsStatus(calculation) {
+  const newsFetch = calculation?.news_fetch;
+  const externalCount = calculation?.external_references?.length || 0;
+  if (newsFetch?.status === "ok") return `수집 ${newsFetch.count ?? externalCount}건`;
+  if (newsFetch?.status) return "미수집";
+  if (externalCount > 0) return `외부근거 ${externalCount}건`;
+  return "-";
 }
 
 function ChartPanel({ chart }) {

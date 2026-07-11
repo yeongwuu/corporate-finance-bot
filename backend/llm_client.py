@@ -34,9 +34,13 @@ def build_rule_based_answer(tool_name: str, calculation: dict, references: list[
 
     steps = calculation.get("steps", [])
     if steps:
-        narrative_steps = [_clean_step(step) for step in steps if _clean_step(step)]
+        narrative_steps = []
+        for step in steps:
+            cleaned = _clean_step(step)
+            if cleaned:
+                narrative_steps.append(cleaned)
         if narrative_steps:
-            paragraphs.append(" ".join(narrative_steps[:5]))
+            paragraphs.extend(narrative_steps[:5])
 
     if references:
         paragraphs.append("관련 재무 기준과 내부 지식 문서도 함께 확인해 답변했습니다.")
@@ -57,11 +61,14 @@ def _clean_step(step: str) -> str:
     ]
     if cleaned.startswith("데이터 원천:"):
         return ""
+    if cleaned.startswith("RAG 근거 후보:"):
+        return "관련 외부 문서 후보를 함께 확인했습니다."
     for prefix in prefixes:
         if cleaned.startswith(prefix):
             cleaned = cleaned.replace(prefix, "", 1).strip()
             break
     cleaned = cleaned.replace(" | ", ", ")
+    cleaned = cleaned.replace(" / ", "\n")
     if cleaned and cleaned[-1] not in ".!?。":
         cleaned = f"{cleaned}."
     return cleaned
