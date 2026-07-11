@@ -7,6 +7,7 @@ from tools.company_trend_tool import analyze_company_trend
 from tools.cost_of_capital_tool import calculate_cost_of_capital
 from tools.finance_concept_tool import explain_finance_concept
 from tools.financial_ratio_tool import analyze_financial_ratios
+from tools.forecast_tool import forecast_company_metric
 from tools.mergers_acquisitions_tool import analyze_mergers_acquisitions
 from tools.portfolio_tool import analyze_portfolio
 from tools.risk_utility_tool import analyze_risk_utility
@@ -15,10 +16,14 @@ from tools.valuation_tool import analyze_valuation
 from tools.working_capital_tool import analyze_working_capital
 
 
-def answer_finance_question(question: str) -> dict:
-    tool_name = select_tool(question)
-    knowledge_references = search_knowledge(question)
-    calculation = run_tool(tool_name, question)
+def answer_finance_question(question: str, history: list[dict] | None = None) -> dict:
+    context_text = _build_context_text(history or [])
+    effective_question = _with_context(question, context_text)
+    tool_name = select_tool(effective_question)
+    knowledge_references = search_knowledge(effective_question)
+    calculation = run_tool(tool_name, effective_question)
+    if context_text and isinstance(calculation, dict):
+        calculation["conversation_context"] = context_text
     references = _combined_references(calculation, knowledge_references)
     answer = build_final_answer(
         question=question,
@@ -35,6 +40,30 @@ def answer_finance_question(question: str) -> dict:
         "references": references,
         "chart": build_chart_spec(tool_name, calculation),
     }
+
+
+def _build_context_text(history: list[dict]) -> str:
+    lines = []
+    for item in history[-6:]:
+        role = str(item.get("role", "")).strip().lower()
+        content = str(item.get("content", "")).strip()
+        if role != "user" or not content:
+            continue
+        compact = " ".join(content.split())
+        lines.append(compact[:220])
+    return "\n".join(lines)
+
+
+def _with_context(question: str, context_text: str) -> str:
+    if not context_text:
+        return question
+    return (
+        f"{question}\n\n"
+        "이전 사용자 질문 맥락:\n"
+        f"{context_text}\n\n"
+        "위 맥락과 현재 질문이 같은 회사, 기간, 지표를 이어받는 후속 질문이면 그 맥락을 반영해 해석한다. "
+        "현재 질문에 새 회사명이나 새 기간이 명시되어 있으면 현재 질문을 우선한다."
+    )
 
 
 def _combined_references(calculation: dict, knowledge_references: list[dict]) -> list[dict]:
@@ -57,6 +86,9 @@ def _combined_references(calculation: dict, knowledge_references: list[dict]) ->
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    if _is_forecast_question(normalized):
+        return "forecast_tool"
 
     if _is_market_news_question(normalized):
         return "company_trend_tool"
@@ -347,6 +379,32 @@ def _is_market_news_question(normalized: str) -> bool:
     return any(term in normalized for term in market_terms) and any(term in normalized for term in reason_terms)
 
 
+def _is_forecast_question(normalized: str) -> bool:
+    forecast_terms = [
+        "예측",
+        "전망",
+        "추정",
+        "forecast",
+        "estimate",
+        "내년",
+        "다음해",
+        "다음 해",
+        "2026",
+        "2027",
+    ]
+    metric_terms = [
+        "매출",
+        "영업이익",
+        "순이익",
+        "현금흐름",
+        "자산",
+        "부채",
+        "자본",
+        "실적",
+    ]
+    return any(term in normalized for term in forecast_terms) and any(term in normalized for term in metric_terms)
+
+
 def run_tool(tool_name: str, question: str) -> dict:
     if tool_name == "capital_budgeting_tool":
         return analyze_capital_budgeting(question)
@@ -360,6 +418,8 @@ def run_tool(tool_name: str, question: str) -> dict:
         return explain_finance_concept(question)
     if tool_name == "financial_ratio_tool":
         return analyze_financial_ratios(question)
+    if tool_name == "forecast_tool":
+        return forecast_company_metric(question)
     if tool_name == "mergers_acquisitions_tool":
         return analyze_mergers_acquisitions(question)
     if tool_name == "portfolio_tool":

@@ -52,6 +52,7 @@ export default function ChatUI() {
   async function sendMessage(nextInput = input) {
     const question = nextInput.trim();
     if (!question || isLoading) return;
+    const history = buildConversationHistory(messages);
 
     const nextMessages = [
       ...messages,
@@ -72,7 +73,7 @@ export default function ChatUI() {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, history }),
         signal: abortController.signal,
       });
 
@@ -93,6 +94,7 @@ export default function ChatUI() {
             tool: data.tool,
             status: data.calculation?.status,
             references: data.references?.length || 0,
+            chart: data.chart,
           },
         },
       ]);
@@ -247,6 +249,9 @@ export default function ChatUI() {
 
 function MessageText({ message }) {
   const [visibleText, setVisibleText] = useState(message.meta?.animate ? "" : message.content);
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [isFolded, setIsFolded] = useState(false);
 
   useEffect(() => {
     if (!message.meta?.animate) {
@@ -272,14 +277,83 @@ function MessageText({ message }) {
     return <p>{visibleText}</p>;
   }
 
-  return <div className="message-body">{formatAnswerText(visibleText)}</div>;
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <>
+      {isFolded ? (
+        <p className="message-preview">{buildPreview(message.content)}</p>
+      ) : (
+        <>
+          <div className="message-body">{formatAnswerText(visibleText)}</div>
+          <ChartPanel chart={message.meta?.chart} compact />
+        </>
+      )}
+      <div className="message-actions" aria-label="답변 작업">
+        <button
+          type="button"
+          onClick={() => setIsFolded(!isFolded)}
+          aria-label={isFolded ? "답변 펼치기" : "답변 접기"}
+          title={isFolded ? "답변 펼치기" : "답변 접기"}
+        >
+          {isFolded ? "펼치기" : "접기"}
+        </button>
+        <button type="button" onClick={copyMessage} aria-label="답변 복사" title="답변 복사">
+          {copied ? "Copied" : "Copy"}
+        </button>
+        <button
+          type="button"
+          className={feedback === "up" ? "active" : undefined}
+          onClick={() => setFeedback(feedback === "up" ? null : "up")}
+          aria-label="좋아요"
+          title="좋아요"
+        >
+          👍
+        </button>
+        <button
+          type="button"
+          className={feedback === "down" ? "active" : undefined}
+          onClick={() => setFeedback(feedback === "down" ? null : "down")}
+          aria-label="비추천"
+          title="비추천"
+        >
+          👎
+        </button>
+      </div>
+    </>
+  );
+}
+
+function buildConversationHistory(messages) {
+  return messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message) => message.content !== INITIAL_MESSAGE.content)
+    .slice(-6)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 900),
+    }));
+}
+
+function buildPreview(content) {
+  const compact = content.replace(/\s+/g, " ").trim();
+  if (!compact) return "접힌 답변입니다.";
+  return compact.length > 120 ? `${compact.slice(0, 120)}...` : compact;
 }
 
 function formatAnswerText(text) {
   if (!text) return null;
 
   return text.split(/\n{2,}/).map((block, blockIndex) => {
-    const lines = block.split("\n").map(cleanDisplayLine).filter(Boolean);
+    const lines = block.split("\n").map(cleanDisplayLine).filter((line) => line && !isDecorativeIconLine(line));
     if (lines.length === 1) {
       return renderAnswerLine(lines[0], `${blockIndex}-0`);
     }
@@ -291,13 +365,17 @@ function formatAnswerText(text) {
   });
 }
 
+function isDecorativeIconLine(line) {
+  return /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u.test(line.trim());
+}
+
 function renderAnswerLine(line, key) {
   const heading = getHeadingMeta(line);
   if (heading) {
     return (
       <p className="answer-heading" key={key}>
         <span aria-hidden="true">{heading.icon}</span>
-        <strong>{renderInlineMath(line)}</strong>
+        <strong>{renderInlineMath(heading.text)}</strong>
       </p>
     );
   }
@@ -306,18 +384,28 @@ function renderAnswerLine(line, key) {
 
 function getHeadingMeta(line) {
   const trimmed = line.trim();
+  const plain = trimmed
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/^\d+[.)]\s*/, "")
+    .replace(/[:：]\s*$/, "")
+    .trim();
+  const isHeadingShape =
+    /^#{1,6}\s+/.test(trimmed) ||
+    /^\d+[.)]\s+/.test(trimmed) ||
+    (plain.length <= 24 && /[:：]$/.test(trimmed));
   const headingRules = [
     { tokens: ["핵심 요약", "요약"], icon: "✨" },
     { tokens: ["비교 대상"], icon: "⚖️" },
     { tokens: ["연도별 추이", "숫자 추이"], icon: "📈" },
     { tokens: ["인사이트"], icon: "💡" },
     { tokens: ["원인", "배경"], icon: "🔎" },
-    { tokens: ["뉴스", "근거"], icon: "📰" },
-    { tokens: ["확인", "추가"], icon: "✅" },
+    { tokens: ["뉴스", "시장 반응"], icon: "📰" },
     { tokens: ["계산 요약"], icon: "🧮" },
     { tokens: ["기간:"], icon: "🏢" },
   ];
-  return headingRules.find((rule) => rule.tokens.some((token) => trimmed.includes(token)));
+  const rule = headingRules.find((candidate) => candidate.tokens.some((token) => plain.includes(token)));
+  if (!rule || !isHeadingShape) return null;
+  return { ...rule, text: plain };
 }
 
 function cleanDisplayLine(line) {
@@ -325,6 +413,7 @@ function cleanDisplayLine(line) {
     .replace(/^#{1,6}\s*/, "")
     .replace(/\*\*(.*?)\*\*/g, "$1")
     .replace(/__(.*?)__/g, "$1")
+    .replace(/^\s*[*-]\s+/, "- ")
     .trim();
 }
 
@@ -386,59 +475,83 @@ function formatNewsStatus(calculation) {
   return "-";
 }
 
-function ChartPanel({ chart }) {
+function ChartPanel({ chart, compact = false }) {
   if (!chart) return null;
   return (
-    <section className="chart-card">
+    <section className={`chart-card${compact ? " compact" : ""}`}>
       <div className="chart-title">
         <strong>{chart.title}</strong>
         {chart.subtitle ? <span>{chart.subtitle}</span> : null}
       </div>
       {chart.type === "line" ? <LineChart chart={chart} /> : null}
       {chart.type === "bar" ? <BarChart chart={chart} /> : null}
+      {chart.range ? (
+        <div className="forecast-range" aria-label="전망 범위">
+          <span>보수 {chart.range.low}</span>
+          <span>기준 {chart.range.base}</span>
+          <span>낙관 {chart.range.high}</span>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function LineChart({ chart }) {
-  const width = 260;
-  const height = 170;
-  const padding = 26;
+  const width = 420;
+  const height = 240;
+  const padding = { top: 18, right: 24, bottom: 34, left: 72 };
   const allPoints = chart.datasets.flatMap((dataset) => dataset.points);
   const xValues = allPoints.map((point) => point.x);
   const yValues = allPoints.map((point) => point.y);
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
-  const minY = Math.min(...yValues);
-  const maxY = Math.max(...yValues);
+  const rawMinY = Math.min(...yValues);
+  const rawMaxY = Math.max(...yValues);
+  const paddingY = Math.max((rawMaxY - rawMinY) * 0.12, Math.abs(rawMaxY) * 0.03, 1);
+  const minY = rawMinY >= 0 ? Math.max(0, rawMinY - paddingY) : rawMinY - paddingY;
+  const maxY = rawMaxY + paddingY;
   const yRange = maxY - minY || 1;
   const xRange = maxX - minX || 1;
+  const yTicks = [0, 0.5, 1].map((ratio) => minY + yRange * ratio);
+  const xTicks = Array.from(new Set(xValues)).sort((a, b) => a - b);
 
-  const scaleX = (value) => padding + ((value - minX) / xRange) * (width - padding * 2);
-  const scaleY = (value) => height - padding - ((value - minY) / yRange) * (height - padding * 2);
+  const scaleX = (value) => padding.left + ((value - minX) / xRange) * (width - padding.left - padding.right);
+  const scaleY = (value) => height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
 
   return (
     <div>
       <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
-        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
-        <line x1={padding} y1={padding} x2={padding} y2={height - padding} />
+        {yTicks.map((tick) => (
+          <g key={tick}>
+            <line className="chart-grid" x1={padding.left} y1={scaleY(tick)} x2={width - padding.right} y2={scaleY(tick)} />
+            <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">{formatChartValue(tick)}</text>
+          </g>
+        ))}
+        <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} />
+        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} />
         {chart.datasets.map((dataset, index) => {
           const path = dataset.points
             .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${scaleX(point.x)} ${scaleY(point.y)}`)
             .join(" ");
           return (
             <g key={dataset.key}>
-              <path className={`chart-line line-${index % 4}`} d={path} />
+              <path className={`chart-line line-${index % 4}${dataset.forecast ? " forecast" : ""}`} d={path} />
               {dataset.points.map((point) => (
-                <circle key={`${dataset.key}-${point.x}`} cx={scaleX(point.x)} cy={scaleY(point.y)} r="3.2">
+                <circle
+                  key={`${dataset.key}-${point.x}`}
+                  className={point.forecast ? "forecast-point" : undefined}
+                  cx={scaleX(point.x)}
+                  cy={scaleY(point.y)}
+                  r={point.forecast ? "4.5" : "3.4"}
+                >
                   <title>{`${dataset.label} ${point.label}: ${point.display}`}</title>
                 </circle>
               ))}
             </g>
           );
         })}
-        {[minX, maxX].map((year) => (
-          <text key={year} x={scaleX(year)} y={height - 6} textAnchor="middle">{year}</text>
+        {xTicks.map((year) => (
+          <text key={year} x={scaleX(year)} y={height - 10} textAnchor="middle">{year}</text>
         ))}
       </svg>
       <div className="chart-legend">
@@ -451,6 +564,14 @@ function LineChart({ chart }) {
       </div>
     </div>
   );
+}
+
+function formatChartValue(value) {
+  const abs = Math.abs(value);
+  if (abs >= 1_0000_0000_0000) return `${(value / 1_0000_0000_0000).toFixed(0)}조`;
+  if (abs >= 1_0000_0000) return `${(value / 1_0000_0000).toFixed(0)}억`;
+  if (abs >= 10_000) return `${(value / 10_000).toFixed(0)}만`;
+  return value.toFixed(0);
 }
 
 function BarChart({ chart }) {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import urllib.error
 import urllib.request
@@ -34,18 +35,98 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
 
 
 def build_latest_news_answer(calculation: dict) -> str:
-    paragraphs = [calculation.get("summary") or "최신 뉴스 근거를 확인했습니다."]
     documents = calculation.get("external_references") or []
-    if documents:
-        lines = ["확인된 뉴스 후보는 다음과 같습니다."]
-        for doc in documents[:5]:
-            source = f" ({doc.get('source_url')})" if doc.get("source_url") else ""
-            lines.append(f"- {doc.get('title', '뉴스')}: {doc.get('snippet', '')}{source}")
-        paragraphs.append("\n".join(lines))
-        paragraphs.append("위 내용은 뉴스 검색 결과의 제목과 요약을 근거로 한 것이므로, 확정 실적 수치는 원문 기사나 DART 잠정실적 공시와 함께 확인하는 것이 좋습니다.")
+    company = (calculation.get("company") or {}).get("company_name") or "해당 기업"
+    query = ((calculation.get("news_fetch") or {}).get("query") or "").strip()
+    period = _extract_period_label(query)
+    matched_doc = _select_news_doc(documents, period)
+    if not matched_doc:
+        return (
+            f"{company}{_period_suffix(period)} 영업이익은 뉴스 검색 결과에서 직접 확인할 수 있는 수치를 찾지 못했습니다.\n\n"
+            "정확한 수치는 DART 잠정실적 공시나 회사 IR 실적 발표 자료에서 확인하는 것이 좋습니다."
+        )
+
+    snippet = _clean_news_text(matched_doc.get("snippet") or matched_doc.get("title") or "")
+    operating_income = _extract_operating_income(snippet)
+    source_url = matched_doc.get("source_url")
+    source_line = f"- 관련 출처: {source_url}" if source_url else f"- 관련 출처: {matched_doc.get('title', '뉴스 검색 결과')}"
+
+    if operating_income:
+        first_sentence = f"{company}{_period_suffix(period)} 영업이익은 뉴스 기준으로 {operating_income}{_amount_copula(operating_income)}"
     else:
-        paragraphs.append("뉴스 검색 결과에서 해당 분기 실적 수치를 확인할 만한 근거를 찾지 못했습니다. DART 잠정실적 공시나 회사 IR 자료를 확인해야 합니다.")
-    return "\n\n".join(paragraphs)
+        first_sentence = f"{company}{_period_suffix(period)} 영업이익은 뉴스에서 직접 수치를 확인해야 합니다."
+
+    evidence = snippet
+    if len(evidence) > 260:
+        evidence = f"{evidence[:260].rstrip()}..."
+    return "\n\n".join(
+        [
+            first_sentence,
+            f"뉴스 요약에서는 {evidence}",
+            source_line,
+            "확정 수치는 원문 기사와 DART 잠정실적 공시를 함께 확인하는 것이 좋습니다.",
+        ]
+    )
+
+
+def _extract_period_label(text: str) -> str | None:
+    year_match = re.search(r"(20[1-3]\d)\s*년", text)
+    quarter_match = re.search(r"([1-4])\s*분기", text)
+    if year_match and quarter_match:
+        return f"{year_match.group(1)}년 {quarter_match.group(1)}분기"
+    if quarter_match:
+        return f"{quarter_match.group(1)}분기"
+    return None
+
+
+def _period_suffix(period: str | None) -> str:
+    return f"의 {period}" if period else "의 최신 분기"
+
+
+def _select_news_doc(documents: list[dict], period: str | None) -> dict | None:
+    if not documents:
+        return None
+    if period:
+        compact_period = period.replace(" ", "")
+        for doc in documents:
+            text = _clean_news_text(f"{doc.get('title', '')} {doc.get('snippet', '')}").replace(" ", "").lower()
+            if compact_period.lower() in text and "영업이익" in text:
+                return doc
+        quarter_match = re.search(r"([1-4])분기", compact_period)
+        if quarter_match:
+            quarter = quarter_match.group(0)
+            quarter_alias = f"{quarter_match.group(1)}q"
+            for doc in documents:
+                text = _clean_news_text(f"{doc.get('title', '')} {doc.get('snippet', '')}").replace(" ", "").lower()
+                if (quarter in text or quarter_alias in text) and "영업이익" in text:
+                    return doc
+        return None
+    return next((doc for doc in documents if "영업이익" in _clean_news_text(doc.get("snippet", ""))), documents[0])
+
+
+def _clean_news_text(text: str) -> str:
+    cleaned = re.sub(r"<[^>]+>", "", str(text))
+    cleaned = re.sub(r"#+\s*", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _extract_operating_income(text: str) -> str | None:
+    cleaned = _clean_news_text(text)
+    patterns = [
+        r"영업이익(?:은|은\s|이|이\s|은\s*약|은\s*전년.*?|[:：]|\s)+([+-]?[0-9,.]+\s*조\s*[0-9,.]*\s*억?원)",
+        r"영업이익(?:은|이|[:：]|\s)+([+-]?[0-9,.]+\s*조원)",
+        r"영업이익(?:은|이|[:：]|\s)+([+-]?[0-9,.]+\s*억원)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, cleaned)
+        if match:
+            return re.sub(r"\s+", "", match.group(1))
+    return None
+
+
+def _amount_copula(amount: str) -> str:
+    return "이었습니다." if amount.endswith("원") else "였습니다."
 
 
 def build_rule_based_answer(tool_name: str, calculation: dict, references: list[dict]) -> str:
@@ -67,7 +148,7 @@ def build_rule_based_answer(tool_name: str, calculation: dict, references: list[
                 paragraphs.append(" ".join(narrative_steps[:3]))
 
     if references and calculation.get("status") not in {"needs_latest_disclosure", "missing_data", "needs_company", "no_data"}:
-        paragraphs.append("관련 재무 기준과 내부 지식 문서도 함께 확인해 답변했습니다.")
+        paragraphs.append("재무제표와 관련 뉴스에서 확인되는 범위 안에서 해석했습니다.")
 
     return "\n\n".join(paragraphs)
 
@@ -90,7 +171,9 @@ def _clean_step(step: str) -> str:
     if cleaned.startswith("데이터 원천:"):
         return ""
     if cleaned.startswith("RAG 근거 후보:"):
-        return "관련 외부 문서 후보를 함께 확인했습니다."
+        return ""
+    if cleaned.startswith("뉴스 근거 후보:"):
+        cleaned = cleaned.replace("뉴스 근거 후보:", "뉴스에서 확인되는 내용:", 1).strip()
     for prefix in prefixes:
         if cleaned.startswith(prefix):
             cleaned = cleaned.replace(prefix, "", 1).strip()
@@ -135,18 +218,22 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
     }
     return (
         "너는 한국 상장기업을 분석하는 재무 애널리스트 AI다.\n"
-        "아래 JSON에는 사용자의 질문, 계산 도구 결과, 재무제표 추이, DART/뉴스 RAG 근거가 들어 있다.\n\n"
+        "아래 JSON에는 사용자의 질문, 계산 결과, 재무제표 추이, 뉴스와 공시 후보가 들어 있다.\n\n"
         "답변 원칙:\n"
         "1. 사용자가 단순 사실 확인이나 특정 수치를 물으면 자연스러운 문단형 답변으로 짧게 답한다.\n"
-        "2. 근거 문서에 없는 산업명, 제품명, 업황 원인은 새로 만들어내지 않는다.\n"
-        "3. 근거 문서가 부족하면 '추가 근거 필요'라고 말하고, 재무제표 패턴에서 가능한 확인 방향만 제시한다.\n"
-        "4. RAG 근거가 있으면 어떤 출처와 연결되는지 짧게 언급한다.\n"
-        "5. 투자 추천, 목표주가, 매수/매도 의견은 내지 않는다.\n"
-        "6. 답변은 한국어로, 실무 보고서처럼 간결하게 작성한다.\n\n"
+        "2. calculation.conversation_context가 있으면 현재 질문이 이전 회사, 기간, 지표를 이어받는지 자연스럽게 판단한다.\n"
+        "3. 근거 문서에 없는 산업명, 제품명, 업황 원인은 새로 만들어내지 않는다.\n"
+        "4. 자료가 부족하면 '현재 확보된 자료만으로는 단정하기 어렵다'고 말하고, 사용자가 바로 이해할 수 있는 범위에서만 설명한다.\n"
+        "5. 뉴스나 공시 후보가 있으면 '뉴스에서는 ...'처럼 자연스럽게 연결하되 출처 시스템 이름을 노출하지 않는다.\n"
+        "6. 투자 추천, 목표주가, 매수/매도 의견은 내지 않는다.\n"
+        "7. 답변은 한국어로, 실무 보고서처럼 간결하게 작성한다.\n\n"
+        "금지 표현:\n"
+        "- RAG, backend, frontend, API, tool, calculation, 내부 지식 문서, 추가 근거, 확인 문서 같은 구현 용어를 답변에 쓰지 않는다.\n"
+        "- 불필요한 Markdown 볼드체, 장식 이모티콘, 체크리스트형 '확인해야 할 추가 근거' 섹션을 만들지 않는다.\n\n"
         "형식 원칙:\n"
         "- 기본은 소제목 없이 1~3개 자연스러운 문단으로 답한다.\n"
         "- 사용자가 비교, 추이, 원인 분석, 여러 지표 분석을 요청한 경우에만 필요한 소제목을 사용한다.\n"
-        "- 소제목을 쓰더라도 Markdown 표시는 최소화하고, 불필요한 장식은 피한다.\n\n"
+        "- 소제목을 쓰더라도 Markdown 표시는 최소화하고, 중요한 소제목에만 짧게 쓴다.\n\n"
         "수식 표기:\n"
         "- 수식이 필요하면 일반 텍스트로 깨지게 쓰지 말고 LaTeX 형식으로 작성한다.\n"
         "- 짧은 수식은 `$P_0 = \\frac{D_1}{k-g}$`처럼 `$...$` 안에 넣는다.\n"

@@ -77,7 +77,7 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
             steps = [
                 f"뉴스 검색 대상: {company.company_name}",
                 "최신 분기 실적은 보유 엑셀 데이터가 아니라 뉴스/공시 근거를 우선 확인했습니다.",
-                "RAG 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:5]),
+                "뉴스에서 확인되는 내용: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:5]),
             ]
             return {
                 "status": "latest_news",
@@ -147,13 +147,13 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     steps.extend(insight_lines)
     steps.extend(evidence_lines)
     if documents:
-        steps.append("RAG 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:3]))
+        steps.append("뉴스/공시에서 확인되는 내용: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:3]))
     elif news_fetch_result and news_fetch_result.get("status") != "ok":
         steps.append(f"뉴스 수집: {news_fetch_result.get('message', '뉴스 수집에 실패했습니다.')}")
     elif dart_fetch_result and dart_fetch_result.get("status") != "ok":
         steps.append(f"DART 원문 수집: {dart_fetch_result.get('message', '사업보고서 수집에 실패했습니다.')}")
     else:
-        steps.append("RAG 근거 후보: 저장된 사업보고서/뉴스 텍스트가 없어 재무제표 패턴 기반으로만 해석했습니다.")
+        steps.append("재무제표 패턴을 중심으로 해석했습니다.")
 
     summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 추이를 분석했습니다."
     if news_requested and not documents:
@@ -283,14 +283,18 @@ def _latest_quarter_news_query(company_name: str | None, question: str) -> str:
 
 def _latest_quarter_news_queries(company_name: str | None, question: str) -> list[str]:
     normalized = _news_query(company_name, question)
-    extras = ["잠정실적", "2분기", "영업이익", "매출"]
+    quarter = _extract_quarter(question) or "분기"
+    year = _extract_requested_year(question)
+    extras = ["잠정실적", quarter, "영업이익", "매출"]
     for token in extras:
         if token not in normalized:
             normalized = f"{normalized} {token}"
     base_company = company_name or ""
+    period = f"{year}년 {quarter}" if year else quarter
     return [
         normalized.strip(),
-        f"{base_company} 2분기 잠정실적 영업이익".strip(),
+        f"{base_company} {period} 잠정실적 영업이익".strip(),
+        f"{base_company} {period} 실적 영업이익".strip(),
         f"{base_company} 잠정실적 영업이익".strip(),
         f"{base_company} 분기 영업이익".strip(),
     ]
@@ -298,6 +302,17 @@ def _latest_quarter_news_queries(company_name: str | None, question: str) -> lis
 
 def _normalize_short_year(text: str) -> str:
     return re.sub(r"(?<!\d)(2[0-9])년", lambda match: f"20{match.group(1)}년", text)
+
+
+def _extract_quarter(question: str) -> str | None:
+    match = re.search(r"([1-4])\s*분기", question)
+    return f"{match.group(1)}분기" if match else None
+
+
+def _extract_requested_year(question: str) -> int | None:
+    normalized = _normalize_short_year(question)
+    match = re.search(r"(20[1-3]\d)\s*년", normalized)
+    return int(match.group(1)) if match else None
 
 
 def _news_documents_only(documents: list[dict]) -> list[dict]:
@@ -376,7 +391,7 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
         if result.get("status") != "ok":
             steps.append(f"{result['company']} 뉴스 수집: {result.get('message', '뉴스 수집에 실패했습니다.')}")
     if documents:
-        steps.append("RAG 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:5]))
+        steps.append("뉴스에서 확인되는 내용: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:5]))
 
     return {
         "status": "ok",
@@ -490,7 +505,7 @@ def _build_insights(metrics: list[dict[str, Any]], documents: list[dict]) -> lis
     if operating_income and net_income and operating_income["change"] > 0 and net_income["change"] < 0:
         lines.append("원인 후보: 영업이익과 순이익 방향이 달라 금융손익, 관계기업손익, 법인세, 중단영업 등 영업외 요인을 확인해야 합니다.")
     if documents:
-        lines.append("근거 연결: 아래 RAG 문서의 사업부문 설명, 업황, 가격/물량 언급을 위 원인 후보와 대조해야 합니다.")
+        lines.append("해석 기준: 사업부문 설명, 업황, 가격/물량 언급을 위 원인 후보와 대조해야 합니다.")
     return lines
 
 
@@ -513,7 +528,7 @@ def _build_evidence_based_explanation(metrics: list[dict[str, Any]], documents: 
 
     if revenue and operating_income:
         if revenue["change"] > 0 and operating_income["change"] < 0:
-            lines.append("근거 기반 해석: 외형은 증가했지만 이익이 감소했으므로 RAG 문단에서 원가, 가격, 제품 믹스, 일회성 비용 언급을 우선 확인해야 합니다.")
+            lines.append("근거 기반 해석: 외형은 증가했지만 이익이 감소했으므로 원가, 가격, 제품 믹스, 일회성 비용 언급을 우선 확인해야 합니다.")
         elif revenue["change"] < 0 and operating_income["change"] > 0:
             lines.append("근거 기반 해석: 외형은 감소했지만 이익이 개선되어 고수익 제품 비중 확대, 비용 절감, 비효율 사업 축소 가능성을 점검해야 합니다.")
 

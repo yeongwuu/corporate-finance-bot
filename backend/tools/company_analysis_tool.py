@@ -81,7 +81,7 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
     if news_fetch_result and news_fetch_result.get("status") == "ok":
         external_references = _news_documents_only(search_external_docs(_news_query(company["company_name"], question), company["company_name"], limit=10))[:5]
         if external_references:
-            steps.append("뉴스 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in external_references[:3]))
+            steps.append("뉴스에서 확인되는 내용: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in external_references[:3]))
     elif news_fetch_result:
         steps.append(f"뉴스 수집: {news_fetch_result.get('message', '뉴스 수집에 실패했습니다.')}")
 

@@ -219,6 +219,11 @@ h2 {
   font-size: 15px;
 }
 
+.message-preview {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .answer-block {
   display: grid;
   gap: 6px;
@@ -236,6 +241,34 @@ h2 {
 
 .message-body .answer-heading strong {
   font-weight: 800;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.message-actions button {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #182026;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.message-actions button:hover,
+.message-actions button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .math-formula {
@@ -334,6 +367,12 @@ h2 {
   border-radius: 8px;
 }
 
+.message .chart-card.compact {
+  margin: 14px 0 0;
+  padding: 12px;
+  box-shadow: none;
+}
+
 .chart-title {
   display: grid;
   gap: 4px;
@@ -359,6 +398,10 @@ h2 {
   stroke-width: 1;
 }
 
+.chart-svg .chart-grid {
+  stroke: #eee6df;
+}
+
 .chart-svg path {
   fill: none;
   stroke-width: 2.4;
@@ -366,10 +409,18 @@ h2 {
   stroke-linejoin: round;
 }
 
+.chart-svg .forecast {
+  stroke-dasharray: 6 5;
+}
+
 .chart-svg circle {
   fill: #ffffff;
   stroke: var(--accent);
   stroke-width: 2;
+}
+
+.chart-svg .forecast-point {
+  fill: var(--accent);
 }
 
 .chart-svg text {
@@ -408,6 +459,22 @@ h2 {
   margin-top: 8px;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.forecast-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.forecast-range span {
+  padding: 4px 7px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  color: #4a2f20;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .chart-legend span {

@@ -21,6 +21,8 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
         return _build_trend_chart(calculation)
     if tool_name == "company_analysis_tool":
         return _build_account_bar_chart(calculation)
+    if tool_name == "forecast_tool":
+        return _build_forecast_chart(calculation)
     return None
 
 
@@ -90,6 +92,49 @@ def _build_account_bar_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
         "subtitle": f"{year}년 당기 기준" if year else "",
         "unit": "KRW",
         "bars": bars,
+    }
+
+
+def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    series_rows = calculation.get("series") or []
+    forecast = calculation.get("forecast") or {}
+    target_year = calculation.get("target_year")
+    if len(series_rows) < 2 or not forecast or not target_year:
+        return None
+
+    actual_points = [
+        {
+            "x": int(row["year"]),
+            "y": float(row["amount"]),
+            "label": f"{row['year']}년",
+            "display": _format_amount(float(row["amount"])),
+        }
+        for row in series_rows
+    ]
+    last = actual_points[-1]
+    forecast_point = {
+        "x": int(target_year),
+        "y": float(forecast["base"]),
+        "label": f"{target_year}년 전망",
+        "display": _format_amount(float(forecast["base"])),
+        "forecast": True,
+    }
+    company = calculation.get("company") or {}
+    account_label = calculation.get("account_label") or "재무지표"
+    return {
+        "type": "line",
+        "title": f"{company.get('company_name', '기업')} {account_label} 전망",
+        "subtitle": f"{actual_points[0]['x']}~{target_year}년, 기준 전망 {_format_amount(float(forecast['base']))}",
+        "unit": "KRW",
+        "datasets": [
+            {"key": "actual", "label": "실적", "points": actual_points},
+            {"key": "forecast", "label": "기준 전망", "points": [last, forecast_point], "forecast": True},
+        ],
+        "range": {
+            "low": _format_amount(float(forecast["low"])),
+            "base": _format_amount(float(forecast["base"])),
+            "high": _format_amount(float(forecast["high"])),
+        },
     }
 
 

@@ -99,6 +99,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     question: str
+    history: list[dict[str, str]] = []
 
 
 @app.get("/health")
@@ -108,4 +109,4 @@ def health_check() -> dict:
 
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> dict:
-    return answer_finance_question(request.question)
+    return answer_finance_question(request.question, history=request.history)
