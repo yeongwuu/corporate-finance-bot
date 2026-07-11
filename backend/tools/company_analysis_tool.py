@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from company_data.financial_store import FinancialStatementStore
+from dart_client import DartClient, load_dart_api_key
 from news_client import NewsClient, get_env as get_news_env
 from rag.external_rag import search_external_docs
 
@@ -14,6 +15,7 @@ MAJOR_ACCOUNT_ORDER = [
     "net_income",
     "total_assets",
     "current_assets",
+    "current_liabilities",
     "cash",
     "receivables",
     "inventories",
@@ -48,6 +50,9 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
         }
 
     if result["status"] != "ok":
+        dart_result = _try_fetch_dart_accounts(result, year)
+        if dart_result:
+            return dart_result
         steps = [result["message"]]
         if result.get("examples"):
             sample = ", ".join(f"{row['company_name']}({row['stock_code']})" for row in result["examples"][:5])
@@ -105,6 +110,106 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
 def _extract_year(question: str) -> int | None:
     match = re.search(r"(20[1-2]\d)", question)
     return int(match.group(1)) if match else None
+
+
+def _try_fetch_dart_accounts(result: dict[str, Any], requested_year: int | None) -> dict[str, Any] | None:
+    if result.get("status") != "no_data" or not load_dart_api_key():
+        return None
+    company = result.get("company") or {}
+    fiscal_year = requested_year or max(result.get("available_years") or [2025])
+    try:
+        dart_result = DartClient().fetch_financial_accounts(
+            stock_code=company.get("stock_code"),
+            corp_name=company.get("company_name"),
+            fiscal_year=fiscal_year,
+        )
+    except Exception:
+        return None
+    if dart_result.get("status") != "ok":
+        return None
+
+    accounts = _map_dart_accounts(dart_result.get("accounts") or [])
+    steps = [
+        f"DART 즉시 조회: {company.get('company_name')} {fiscal_year}년 사업보고서 계정을 조회했습니다.",
+        "주요계정: " + " | ".join(_format_major_accounts(accounts)),
+    ]
+    return {
+        "status": "ok",
+        "summary": f"{company.get('company_name')}의 {fiscal_year}년 주요 재무계정을 DART에서 즉시 조회했습니다.",
+        "steps": steps,
+        "company": company,
+        "year": fiscal_year,
+        "accounts": accounts,
+        "ratios": _calculate_basic_ratios(accounts),
+        "source": "dart",
+    }
+
+
+def _map_dart_accounts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    rules = {
+        "revenue": ("매출액", ["매출액", "영업수익", "수익(매출액)"]),
+        "operating_income": ("영업이익", ["영업이익", "영업이익(손실)"]),
+        "net_income": ("당기순이익", ["당기순이익", "당기순이익(손실)"]),
+        "total_assets": ("자산총계", ["자산총계", "자산 총계"]),
+        "current_assets": ("유동자산", ["유동자산"]),
+        "current_liabilities": ("유동부채", ["유동부채"]),
+        "total_liabilities": ("부채총계", ["부채총계", "부채 총계"]),
+        "total_equity": ("자본총계", ["자본총계", "자본 총계", "자본합계"]),
+    }
+    accounts = {}
+    for key, (label, names) in rules.items():
+        row = _find_dart_row(rows, names)
+        if row:
+            accounts[key] = {"label": label, "amount": _parse_dart_amount(row.get("thstrm_amount"))}
+    return accounts
+
+
+def _find_dart_row(rows: list[dict[str, Any]], names: list[str]) -> dict[str, Any] | None:
+    for row in rows:
+        account_name = str(row.get("account_nm") or "").strip()
+        statement = str(row.get("sj_div") or "").strip()
+        if statement not in {"BS", "IS", "CIS"}:
+            continue
+        if account_name in names:
+            return row
+    for row in rows:
+        account_name = str(row.get("account_nm") or "").strip()
+        if any(name in account_name for name in names):
+            return row
+    return None
+
+
+def _parse_dart_amount(value: Any) -> float:
+    if value is None:
+        return 0.0
+    cleaned = re.sub(r"[^0-9.-]", "", str(value))
+    return float(cleaned) if cleaned else 0.0
+
+
+def _calculate_basic_ratios(accounts: dict[str, Any]) -> dict[str, float | None]:
+    def amount(key: str) -> float | None:
+        item = accounts.get(key)
+        return item.get("amount") if item else None
+
+    revenue = amount("revenue")
+    operating_income = amount("operating_income")
+    net_income = amount("net_income")
+    total_liabilities = amount("total_liabilities")
+    total_equity = amount("total_equity")
+    current_assets = amount("current_assets")
+    current_liabilities = amount("current_liabilities")
+    return {
+        "operating_margin": _safe_divide(operating_income, revenue),
+        "net_margin": _safe_divide(net_income, revenue),
+        "debt_to_equity": _safe_divide(total_liabilities, total_equity),
+        "current_ratio": _safe_divide(current_assets, current_liabilities),
+    }
+
+
+def _safe_divide(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return numerator / denominator
 
 
 def _format_major_accounts(accounts: dict[str, Any]) -> list[str]:

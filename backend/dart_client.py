@@ -205,6 +205,43 @@ class DartClient:
             "chars": len(filtered),
         }
 
+    def fetch_financial_accounts(
+        self,
+        stock_code: str | None = None,
+        corp_name: str | None = None,
+        fiscal_year: int | None = None,
+        fs_div: str = "CFS",
+    ) -> dict[str, Any]:
+        company = self.find_company(stock_code=stock_code, corp_name=corp_name)
+        if not company:
+            return {"status": "not_found", "message": "DART에서 회사를 찾지 못했습니다."}
+        if not fiscal_year:
+            fiscal_year = 2025
+
+        data = self._request_json(
+            "fnlttSinglAcntAll.json",
+            {
+                "corp_code": company.corp_code,
+                "bsns_year": str(fiscal_year),
+                "reprt_code": "11011",
+                "fs_div": fs_div,
+            },
+        )
+        if data.get("status") != "000":
+            return {
+                "status": "not_found",
+                "message": data.get("message") or "DART 재무제표 계정 조회 결과가 없습니다.",
+                "company": company.__dict__,
+                "year": fiscal_year,
+            }
+        return {
+            "status": "ok",
+            "company": company.__dict__,
+            "year": fiscal_year,
+            "accounts": data.get("list", []),
+            "source": "DART fnlttSinglAcntAll",
+        }
+
     def _request_json(self, endpoint: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         payload = self._request_bytes(endpoint, params)
         return json.loads(payload.decode("utf-8"))

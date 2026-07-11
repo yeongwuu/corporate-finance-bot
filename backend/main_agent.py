@@ -10,6 +10,7 @@ from tools.cost_of_capital_tool import calculate_cost_of_capital
 from tools.finance_concept_tool import explain_finance_concept
 from tools.financial_ratio_tool import analyze_financial_ratios
 from tools.forecast_tool import forecast_company_metric
+from tools.industry_rank_tool import rank_industry_companies
 from tools.mergers_acquisitions_tool import analyze_mergers_acquisitions
 from tools.portfolio_tool import analyze_portfolio
 from tools.risk_utility_tool import analyze_risk_utility
@@ -22,7 +23,7 @@ from tools.working_capital_tool import analyze_working_capital
 def answer_finance_question(question: str, history: list[dict] | None = None) -> dict:
     started_at = time.perf_counter()
     trace = []
-    context_text = _build_context_text(history or [])
+    context_text = _build_context_text(history or []) if _should_use_context(question) else ""
     if context_text:
         trace.append(_trace_item("이전 질문 맥락 확인", "후속 질문 해석에 사용할 최근 사용자 질문을 반영했습니다.", started_at))
     effective_question = _with_context(question, context_text)
@@ -84,6 +85,7 @@ def _tool_description(tool_name: str) -> str:
         "company_analysis_tool": "기업 재무제표 주요 계정을 조회하는 경로를 선택했습니다.",
         "forecast_tool": "최근 재무 추이를 바탕으로 단순 전망을 계산하는 경로를 선택했습니다.",
         "financial_ratio_tool": "재무비율 계산 경로를 선택했습니다.",
+        "industry_rank_tool": "산업/업종별 기업 순위를 조회하는 경로를 선택했습니다.",
         "valuation_tool": "기업가치평가 관련 경로를 선택했습니다.",
         "capital_budgeting_tool": "투자안 평가 관련 경로를 선택했습니다.",
         "portfolio_tool": "포트폴리오 분석 경로를 선택했습니다.",
@@ -125,6 +127,47 @@ def _build_context_text(history: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _should_use_context(question: str) -> bool:
+    normalized = question.lower().replace(" ", "")
+    independent_terms = [
+        "상위",
+        "top",
+        "랭킹",
+        "순위",
+        "목록",
+        "리스트",
+        "산업",
+        "업종",
+        "섹터",
+        "시장",
+        "기업들",
+        "회사들",
+    ]
+    if any(term in normalized for term in independent_terms):
+        return False
+
+    follow_up_terms = [
+        "그럼",
+        "그러면",
+        "그건",
+        "그 회사",
+        "같은",
+        "동일",
+        "이어서",
+        "아까",
+        "방금",
+        "그 기간",
+        "최근에도",
+        "비교해",
+        "영업이익은",
+        "순이익은",
+        "매출은",
+        "주가는",
+        "이익률은",
+    ]
+    return any(term.replace(" ", "") in normalized for term in follow_up_terms)
+
+
 def _with_context(question: str, context_text: str) -> str:
     if not context_text:
         return question
@@ -163,6 +206,9 @@ def select_tool(question: str) -> str:
 
     if _is_stock_price_question(normalized):
         return "stock_price_tool"
+
+    if _is_industry_rank_question(normalized):
+        return "industry_rank_tool"
 
     if _is_market_news_question(normalized):
         return "company_trend_tool"
@@ -504,6 +550,12 @@ def _is_stock_price_question(normalized: str) -> bool:
     return any(term in normalized for term in analysis_terms) and not any(term in normalized for term in reason_terms)
 
 
+def _is_industry_rank_question(normalized: str) -> bool:
+    rank_terms = ["상위", "top", "순위", "랭킹", "랭크"]
+    group_terms = ["산업", "업종", "섹터", "기업", "회사"]
+    return any(term in normalized for term in rank_terms) and any(term in normalized for term in group_terms)
+
+
 def run_tool(tool_name: str, question: str) -> dict:
     if tool_name == "capital_budgeting_tool":
         return analyze_capital_budgeting(question)
@@ -519,6 +571,8 @@ def run_tool(tool_name: str, question: str) -> dict:
         return analyze_financial_ratios(question)
     if tool_name == "forecast_tool":
         return forecast_company_metric(question)
+    if tool_name == "industry_rank_tool":
+        return rank_industry_companies(question)
     if tool_name == "mergers_acquisitions_tool":
         return analyze_mergers_acquisitions(question)
     if tool_name == "portfolio_tool":
