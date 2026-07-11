@@ -202,6 +202,21 @@ cython_debug/
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
+.DS_Store
+
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Local data and generated financial statement cache
+KOSDAQ_financial_statements.full.xlsx
+backend/data/*.sqlite
+backend/data/*.sqlite-*
+backend/data/dart/
+backend/external_docs/*.md
+backend/external_docs/*.txt
+!backend/external_docs/_how_to_add_sources.md
 
 # Ruff stuff:
 .ruff_cache/

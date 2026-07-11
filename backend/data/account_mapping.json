@@ -1,0 +1,102 @@
+{
+  "revenue": {
+    "label": "매출액",
+    "statements": ["PL"],
+    "code_exact": ["ifrs-full_Revenue", "ifrs_Revenue"],
+    "name_exact": ["매출액", "영업수익", "수익(매출액)"],
+    "name_contains": ["매출액", "영업수익"]
+  },
+  "gross_profit": {
+    "label": "매출총이익",
+    "statements": ["PL"],
+    "code_exact": ["ifrs-full_GrossProfit", "ifrs_GrossProfit"],
+    "name_exact": ["매출총이익"]
+  },
+  "operating_income": {
+    "label": "영업이익",
+    "statements": ["PL"],
+    "code_exact": ["dart_OperatingIncomeLoss", "ifrs-full_ProfitLossFromOperatingActivities"],
+    "name_exact": ["영업이익", "영업이익(손실)"]
+  },
+  "net_income": {
+    "label": "당기순이익",
+    "statements": ["PL"],
+    "code_exact": ["ifrs-full_ProfitLoss", "ifrs_ProfitLoss"],
+    "name_exact": ["당기순이익", "당기순이익(손실)", "분기순이익", "반기순이익"]
+  },
+  "total_assets": {
+    "label": "자산총계",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_Assets", "ifrs_Assets"],
+    "name_exact": ["자산총계", "자산 총계"]
+  },
+  "current_assets": {
+    "label": "유동자산",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_CurrentAssets", "ifrs_CurrentAssets"],
+    "name_exact": ["유동자산"]
+  },
+  "cash": {
+    "label": "현금및현금성자산",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_CashAndCashEquivalents", "ifrs_CashAndCashEquivalents"],
+    "name_contains": ["현금및현금성자산", "현금 및 현금성자산"]
+  },
+  "receivables": {
+    "label": "매출채권",
+    "statements": ["BS"],
+    "name_contains": ["매출채권"]
+  },
+  "inventories": {
+    "label": "재고자산",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_Inventories", "ifrs_Inventories"],
+    "name_exact": ["재고자산"]
+  },
+  "current_liabilities": {
+    "label": "유동부채",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_CurrentLiabilities", "ifrs_CurrentLiabilities"],
+    "name_exact": ["유동부채"]
+  },
+  "total_liabilities": {
+    "label": "부채총계",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_Liabilities", "ifrs_Liabilities"],
+    "name_exact": ["부채총계", "부채 총계"]
+  },
+  "total_equity": {
+    "label": "자본총계",
+    "statements": ["BS"],
+    "code_exact": ["ifrs-full_Equity", "ifrs_Equity"],
+    "name_exact": ["자본총계", "자본 총계", "자본합계", "자본 합계"]
+  },
+  "operating_cash_flow": {
+    "label": "영업활동현금흐름",
+    "statements": ["CF"],
+    "code_exact": ["ifrs-full_CashFlowsFromUsedInOperatingActivities", "ifrs_CashFlowsFromUsedInOperatingActivities"],
+    "name_contains": ["영업활동현금흐름", "영업활동으로 인한 현금흐름"]
+  },
+  "investing_cash_flow": {
+    "label": "투자활동현금흐름",
+    "statements": ["CF"],
+    "code_exact": ["ifrs-full_CashFlowsFromUsedInInvestingActivities", "ifrs_CashFlowsFromUsedInInvestingActivities"],
+    "name_contains": ["투자활동현금흐름", "투자활동으로 인한 현금흐름"]
+  },
+  "financing_cash_flow": {
+    "label": "재무활동현금흐름",
+    "statements": ["CF"],
+    "code_exact": ["ifrs-full_CashFlowsFromUsedInFinancingActivities", "ifrs_CashFlowsFromUsedInFinancingActivities"],
+    "name_contains": ["재무활동현금흐름", "재무활동으로 인한 현금흐름"]
+  },
+  "depreciation": {
+    "label": "감가상각비",
+    "statements": ["CF", "PL"],
+    "name_contains": ["감가상각비", "감가상각"]
+  },
+  "capex": {
+    "label": "유형자산 취득",
+    "statements": ["CF"],
+    "name_contains": ["유형자산의 취득", "유형자산 취득", "유형자산의 증가"]
+  }
+}

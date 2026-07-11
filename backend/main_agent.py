@@ -1,6 +1,8 @@
 from llm_client import build_final_answer
 from rag.simple_rag import search_knowledge
 from tools.capital_budgeting_tool import analyze_capital_budgeting
+from tools.company_analysis_tool import analyze_company_financials
+from tools.company_trend_tool import analyze_company_trend
 from tools.cost_of_capital_tool import calculate_cost_of_capital
 from tools.finance_concept_tool import explain_finance_concept
 from tools.financial_ratio_tool import analyze_financial_ratios
@@ -40,6 +42,42 @@ def select_tool(question: str) -> str:
         return "capital_budgeting_tool"
     if any(word in normalized for word in ["m&a", "m＆a", "인수합병", "인수 합병", "합병", "흡수합병", "신설합병", "수직적 합병", "수평적 합병", "다각적 합병", "공개매수", "공개 매수", "곰의 포옹", "새벽의 기습", "lbo", "mbo", "차입매수", "차입 매수", "경영자매수", "적대적", "독약조항", "독약 풋", "황금낙하산", "백기사", "백지주", "황금주", "차등의결권", "팩맨", "왕관의 보석", "녹색편지", "행동주의 펀드", "토빈의 q", "저평가 가설", "경영자주의", "시너지 효과", "시너지 계산", "피인수기업", "경제성 평가", "인수 대가", "인수프리미엄", "합병 프리미엄", "주식교환", "주식 교환", "교환비율", "교환 비율", "현금지급", "현금 지급", "eps법", "주가법", "합병 후 eps", "합병후 eps", "합병 후 주가", "합병후 주가", "프리미엄률", "배당성장", "포이즌필", "포이즌 필", "신주인수권", "부의 이전", "무임승차", "사업구조 변경", "합병 후 표준편차", "합병 후 베타"]):
         return "mergers_acquisitions_tool"
+
+    if (
+        any(word in normalized for word in ["추이", "성장률", "cagr", "연도별", "기간별", "원인", "이유", "왜", "인사이트", "사업보고서", "뉴스"])
+        and any(word in normalized for word in ["매출", "영업이익", "순이익", "현금흐름", "자산", "부채", "자본", "재무제표", "기업"])
+        and not any(word in normalized for word in ["문제", "계산하시오", "구하시오", "공식"])
+    ):
+        return "company_trend_tool"
+
+    if (
+        any(
+            word in normalized
+            for word in [
+                "재무제표",
+                "주요계정",
+                "주요 계정",
+                "기업 분석",
+                "회사 분석",
+                "코스닥",
+                "kosdaq",
+                "매출액",
+                "영업이익",
+                "당기순이익",
+                "자산총계",
+                "부채총계",
+                "자본총계",
+                "재고자산",
+                "매출채권",
+                "영업활동현금흐름",
+                "투자활동현금흐름",
+                "재무활동현금흐름",
+                "현금흐름",
+            ]
+        )
+        and not any(word in normalized for word in ["문제", "계산하시오", "구하시오", "공식"])
+    ):
+        return "company_analysis_tool"
 
     if any(
         word in normalized
@@ -244,6 +282,10 @@ def select_tool(question: str) -> str:
 def run_tool(tool_name: str, question: str) -> dict:
     if tool_name == "capital_budgeting_tool":
         return analyze_capital_budgeting(question)
+    if tool_name == "company_analysis_tool":
+        return analyze_company_financials(question)
+    if tool_name == "company_trend_tool":
+        return analyze_company_trend(question)
     if tool_name == "cost_of_capital_tool":
         return calculate_cost_of_capital(question)
     if tool_name == "finance_concept_tool":
