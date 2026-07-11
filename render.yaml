@@ -25,6 +25,20 @@ services:
         sync: false
       - key: NAVER_CLIENT_SECRET
         sync: false
+      - key: FEEDBACK_EMAIL_TO
+        value: 11xcv@naver.com
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "true"
 
   - type: web
     name: corporate-finance-bot-web

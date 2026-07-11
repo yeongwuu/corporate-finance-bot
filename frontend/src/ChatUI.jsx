@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 
@@ -23,16 +23,13 @@ export default function ChatUI() {
   const [loadingStartedAt, setLoadingStartedAt] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [lastResult, setLastResult] = useState(null);
+  const [pendingFeedback, setPendingFeedback] = useState(null);
+  const [feedbackNotice, setFeedbackNotice] = useState("");
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const inputRef = useRef(null);
   const abortControllerRef = useRef(null);
 
   const canSubmit = input.trim().length > 0 && !isLoading;
-
-  const stats = useMemo(() => {
-    const userCount = messages.filter((message) => message.role === "user").length;
-    const assistantCount = messages.filter((message) => message.role === "assistant").length;
-    return { userCount, assistantCount };
-  }, [messages]);
 
   useEffect(() => {
     if (!isLoading || !loadingStartedAt) {
@@ -83,12 +80,13 @@ export default function ChatUI() {
         throw new Error(data.message || "Request failed");
       }
 
+      const answer = data.answer || "답변을 생성하지 못했습니다.";
       setLastResult(data);
       setMessages([
         ...nextMessages,
         {
           role: "assistant",
-          content: data.answer || "답변을 생성하지 못했습니다.",
+          content: answer,
           meta: {
             animate: true,
             tool: data.tool,
@@ -96,28 +94,49 @@ export default function ChatUI() {
             references: data.references?.length || 0,
             chart: data.chart,
             trace: data.trace || [],
+            suggestions: shouldShowAlternativeQuestions(answer, data)
+              ? buildAlternativeQuestions(question)
+              : [],
           },
         },
       ]);
+      if (shouldAskFeedbackConsent(data, answer)) {
+        setPendingFeedback({
+          question,
+          answer,
+          tool: data.tool,
+          status: data.calculation?.status,
+        });
+      }
     } catch (error) {
+      const answer =
+        error.name === "AbortError"
+          ? "요청을 취소했습니다."
+          : error.message === "Failed to fetch"
+            ? "백엔드 서버에 연결하지 못했습니다."
+            : error.message;
       setLastResult(null);
       setMessages([
         ...nextMessages,
         {
           role: "assistant",
-          content:
-            error.name === "AbortError"
-              ? "요청을 취소했습니다."
-              : error.message === "Failed to fetch"
-                ? "백엔드 서버에 연결하지 못했습니다."
-                : error.message,
+          content: answer,
           meta: {
             animate: true,
             tool: error.name === "AbortError" ? "cancelled" : "network",
             status: error.name === "AbortError" ? "cancelled" : "error",
+            suggestions: error.name === "AbortError" ? [] : buildAlternativeQuestions(question),
           },
         },
       ]);
+      if (error.name !== "AbortError") {
+        setPendingFeedback({
+          question,
+          answer,
+          tool: "network",
+          status: "error",
+        });
+      }
     } finally {
       abortControllerRef.current = null;
       setIsLoading(false);
@@ -130,24 +149,40 @@ export default function ChatUI() {
     abortControllerRef.current?.abort();
   }
 
+  async function submitFeedbackEmail() {
+    if (!pendingFeedback || isSendingFeedback) return;
+    setIsSendingFeedback(true);
+    setFeedbackNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/feedback-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...pendingFeedback, consent: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "이메일 전송에 실패했습니다.");
+      }
+      setFeedbackNotice(data.message || "질문과 답변 내용을 전송했습니다.");
+      setPendingFeedback(null);
+    } catch (error) {
+      setFeedbackNotice(error.message || "이메일 전송에 실패했습니다.");
+    } finally {
+      setIsSendingFeedback(false);
+    }
+  }
+
+  function dismissFeedbackEmail() {
+    setPendingFeedback(null);
+    setFeedbackNotice("수집하지 않고 닫았습니다.");
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <div>
           <p className="eyebrow">Corporate Finance Bot</p>
         </div>
-
-        <div className="status-panel">
-          <div>
-            <span>API</span>
-            <strong>{API_URL}</strong>
-          </div>
-          <div>
-            <span>대화</span>
-            <strong>{stats.userCount} / {stats.assistantCount}</strong>
-          </div>
-        </div>
-
       </aside>
 
       <section className="chat-panel" aria-label="채팅">
@@ -157,7 +192,7 @@ export default function ChatUI() {
               <div className="message-header">
                 <strong>{message.role === "user" ? "User" : "Assistant"}</strong>
               </div>
-              <MessageText message={message} />
+              <MessageText message={message} onAskSuggestion={sendMessage} />
             </article>
           ))}
 
@@ -171,7 +206,8 @@ export default function ChatUI() {
                   <span>working</span>
                 </span>
               </div>
-              <p>답변을 생성하고 있습니다.</p>
+              <p>질문을 분석하고 필요한 데이터를 조회하는 중입니다.</p>
+              <LoadingTrace elapsedSeconds={elapsedSeconds} />
             </article>
           ) : null}
         </div>
@@ -244,18 +280,45 @@ export default function ChatUI() {
           ))}
         </div>
       </aside>
+      {feedbackNotice ? (
+        <div className="feedback-toast" role="status">
+          {feedbackNotice}
+        </div>
+      ) : null}
+      {pendingFeedback ? (
+        <div className="consent-backdrop" role="presentation">
+          <section className="consent-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-consent-title">
+            <h2 id="feedback-consent-title">답변 개선을 위해 내용을 전송할까요?</h2>
+            <p>
+              이 질문은 챗봇이 충분히 분석하지 못한 것으로 보입니다. 질문과 답변 내용을 개발자 이메일로 보내
+              개선에 활용해도 될까요?
+            </p>
+            <div className="consent-preview">
+              <strong>전송 내용</strong>
+              <p>{buildPreview(pendingFeedback.question)}</p>
+              <p>{buildPreview(pendingFeedback.answer)}</p>
+            </div>
+            <div className="consent-actions">
+              <button type="button" onClick={dismissFeedbackEmail} disabled={isSendingFeedback}>
+                아니요
+              </button>
+              <button type="button" className="primary" onClick={submitFeedbackEmail} disabled={isSendingFeedback}>
+                {isSendingFeedback ? "전송 중" : "동의하고 전송"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
 
-function MessageText({ message }) {
+function MessageText({ message, onAskSuggestion }) {
   const [visibleText, setVisibleText] = useState(message.meta?.animate ? "" : message.content);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [isFolded, setIsFolded] = useState(false);
-  const [showTrace, setShowTrace] = useState(false);
   const isInitialAssistantMessage = message.role === "assistant" && message.meta?.tool === "ready";
-  const trace = message.meta?.trace || [];
 
   useEffect(() => {
     if (!message.meta?.animate) {
@@ -299,21 +362,11 @@ function MessageText({ message }) {
         <>
           <div className="message-body">{formatAnswerText(visibleText)}</div>
           <ChartPanel chart={message.meta?.chart} compact />
-          {trace.length > 0 ? <TracePanel trace={trace} isOpen={showTrace} /> : null}
+          <SuggestionPanel suggestions={message.meta?.suggestions} onAskSuggestion={onAskSuggestion} />
         </>
       )}
       {!isInitialAssistantMessage ? (
         <div className="message-actions" aria-label="답변 작업">
-          {trace.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setShowTrace(!showTrace)}
-              aria-label={showTrace ? "처리 과정 숨기기" : "처리 과정 보기"}
-              title={showTrace ? "처리 과정 숨기기" : "처리 과정 보기"}
-            >
-              과정
-            </button>
-          ) : null}
           <button
             type="button"
             onClick={() => setIsFolded(!isFolded)}
@@ -349,20 +402,38 @@ function MessageText({ message }) {
   );
 }
 
-function TracePanel({ trace, isOpen }) {
-  if (!isOpen) return null;
+function SuggestionPanel({ suggestions, onAskSuggestion }) {
+  if (!suggestions?.length) return null;
   return (
-    <div className="trace-panel" aria-label="백엔드 처리 과정">
-      <strong>처리 과정</strong>
-      <ol>
-        {trace.map((item, index) => (
-          <li key={`${item.label}-${index}`}>
-            <span>{item.label}</span>
-            <p>{item.detail}</p>
-            <em>{item.elapsed_ms}ms</em>
-          </li>
+    <div className="suggestion-panel" aria-label="다시 시도할 수 있는 질문">
+      <strong>이 질문으로 다시 시도해볼 수 있습니다.</strong>
+      <div>
+        {suggestions.map((suggestion) => (
+          <button key={suggestion} type="button" onClick={() => onAskSuggestion?.(suggestion)}>
+            {suggestion}
+          </button>
         ))}
-      </ol>
+      </div>
+    </div>
+  );
+}
+
+function LoadingTrace({ elapsedSeconds }) {
+  const steps = [
+    "질문 의도와 맥락을 해석하고 있습니다.",
+    "필요한 재무제표, 뉴스, 공시 또는 주가 데이터를 고르고 있습니다.",
+    "계산 툴에서 지표와 비교 대상을 처리하고 있습니다.",
+    "답변에 필요한 그래프와 핵심 문장을 정리하고 있습니다.",
+  ];
+  const activeIndex = Math.min(steps.length - 1, Math.floor(elapsedSeconds / 2));
+  return (
+    <div className="loading-trace" aria-label="실시간 처리 과정">
+      {steps.map((step, index) => (
+        <div key={step} className={index <= activeIndex ? "active" : undefined}>
+          <span>{index + 1}</span>
+          <p>{step}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -382,6 +453,110 @@ function buildPreview(content) {
   const compact = content.replace(/\s+/g, " ").trim();
   if (!compact) return "접힌 답변입니다.";
   return compact.length > 120 ? `${compact.slice(0, 120)}...` : compact;
+}
+
+function shouldAskFeedbackConsent(data, answer) {
+  const status = data?.calculation?.status || data?.status;
+  const failureStatuses = new Set([
+    "error",
+    "missing_data",
+    "needs_company",
+    "no_data",
+    "needs_latest_disclosure",
+    "missing_config",
+  ]);
+  if (failureStatuses.has(status)) return true;
+
+  const normalized = String(answer || "").replace(/\s+/g, " ");
+  return [
+    "찾지 못했습니다",
+    "확인할 수 없습니다",
+    "제공하기 어렵습니다",
+    "분석하기 어렵습니다",
+    "데이터가 부족",
+    "정보가 부족",
+    "답변을 생성하지 못했습니다",
+    "연결하지 못했습니다",
+  ].some((phrase) => normalized.includes(phrase));
+}
+
+function shouldShowAlternativeQuestions(answer, data) {
+  const normalized = String(answer || "").replace(/\s+/g, " ").toLowerCase();
+  if (normalized.includes("load failed")) return true;
+  if (data?.calculation?.status === "error") return true;
+  return normalized.includes("백엔드 서버에 연결하지 못했습니다") || normalized.includes("request failed");
+}
+
+function buildAlternativeQuestions(question) {
+  const companyNames = extractCompanies(question);
+  const metric = extractMetric(question);
+
+  if (companyNames.length >= 2) {
+    const first = companyNames[0];
+    const second = companyNames[1];
+    return [
+      `${first}의 ${metric}은 얼마입니까?`,
+      `${second}의 ${metric}은 얼마입니까?`,
+      `${first}의 ${metric} 추이는 어떻습니까?`,
+    ];
+  }
+
+  if (companyNames.length === 1) {
+    const company = companyNames[0];
+    return [
+      `${company}의 ${metric}은 얼마입니까?`,
+      `${company}의 ${metric} 추이는 어떻습니까?`,
+      `${company}의 최근 ${metric}을 그래프로 보여줘`,
+    ];
+  }
+
+  return [
+    `${metric}이 높은 기업을 알려줘`,
+    `최근 5개년 ${metric} 추이를 분석해줘`,
+    `${metric}을 계산하는 데 필요한 재무제표 계정은 무엇입니까?`,
+  ];
+}
+
+function extractCompanies(question) {
+  const aliases = [
+    ["삼성전자", ["삼성전자", "삼전"]],
+    ["SK하이닉스", ["sk하이닉스", "SK하이닉스", "하이닉스"]],
+    ["한화에어로스페이스", ["한화에어로스페이스", "한화에어로"]],
+    ["한국항공우주", ["한국항공우주", "KAI"]],
+    ["LIG넥스원", ["LIG넥스원", "lig넥스원"]],
+    ["현대로템", ["현대로템"]],
+    ["셀트리온", ["셀트리온"]],
+    ["LG에너지솔루션", ["LG에너지솔루션", "lg에너지솔루션"]],
+    ["현대차", ["현대차", "현대자동차"]],
+    ["기아", ["기아"]],
+  ];
+  const lowered = question.toLowerCase();
+  const found = [];
+  aliases.forEach(([name, tokens]) => {
+    if (tokens.some((token) => lowered.includes(token.toLowerCase())) && !found.includes(name)) {
+      found.push(name);
+    }
+  });
+  return found;
+}
+
+function extractMetric(question) {
+  const compact = question.replace(/\s+/g, "").toLowerCase();
+  const rules = [
+    ["매출액영업이익률", ["매출액영업이익률", "영업이익률", "영업마진"]],
+    ["매출액순이익률", ["매출액순이익률", "순이익률", "순이익마진"]],
+    ["매출액이익률", ["매출이익률", "매출액이익률", "이익률"]],
+    ["매출원가율", ["매출원가율", "원가율"]],
+    ["판관비율", ["판관비율", "판매관리비율", "판매비와관리비율"]],
+    ["매출액", ["매출액", "매출"]],
+    ["영업이익", ["영업이익"]],
+    ["당기순이익", ["당기순이익", "순이익"]],
+    ["주가", ["주가", "종가"]],
+    ["부채비율", ["부채비율"]],
+    ["유동비율", ["유동비율"]],
+  ];
+  const match = rules.find(([, tokens]) => tokens.some((token) => compact.includes(token.toLowerCase())));
+  return match ? match[0] : "재무지표";
 }
 
 function formatAnswerText(text) {

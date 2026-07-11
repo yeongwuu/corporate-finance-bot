@@ -23,6 +23,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_industry_rank_answer(calculation)
     if calculation.get("ratio_series"):
         return build_ratio_trend_answer(calculation)
+    if calculation.get("comparison"):
+        return build_company_comparison_answer(calculation)
     if tool_name == "company_analysis_tool" and calculation.get("status") == "ok":
         return build_company_accounts_answer(calculation)
 
@@ -47,18 +49,29 @@ def build_ratio_trend_answer(calculation: dict) -> str:
     company_name = company.get("company_name", "해당 기업")
     start_year = period.get("start_year") or (ratio_series[0]["year"] if ratio_series else "")
     end_year = period.get("end_year") or (ratio_series[-1]["year"] if ratio_series else "")
-    lines = [f"{company_name}의 {start_year}~{end_year}년 매출액이익률 추이는 다음과 같습니다."]
+    ratio_labels = []
+    for row in ratio_series:
+        for key, item in row.items():
+            if key != "year" and isinstance(item, dict) and item.get("label") not in ratio_labels:
+                ratio_labels.append(item.get("label"))
+    title_label = " 및 ".join(ratio_labels[:3]) if ratio_labels else "재무 비율"
+    lines = [f"{company_name}의 {start_year}~{end_year}년 {title_label} 추이는 다음과 같습니다."]
 
     for row in ratio_series:
         values = []
-        if row.get("operating_margin"):
-            values.append(f"매출액영업이익률 {row['operating_margin']['display']}")
-        if row.get("net_margin"):
-            values.append(f"매출액순이익률 {row['net_margin']['display']}")
+        for key, item in row.items():
+            if key == "year" or not isinstance(item, dict):
+                continue
+            values.append(f"{item['label']} {item['display']}")
         if values:
             lines.append(f"{row['year']}년: " + ", ".join(values))
 
-    for key in ["operating_margin", "net_margin"]:
+    ratio_keys = []
+    for row in ratio_series:
+        for key, item in row.items():
+            if key != "year" and isinstance(item, dict) and key not in ratio_keys:
+                ratio_keys.append(key)
+    for key in ratio_keys:
         values = [row[key] | {"year": row["year"]} for row in ratio_series if row.get(key)]
         if len(values) < 2:
             continue
@@ -66,7 +79,7 @@ def build_ratio_trend_answer(calculation: dict) -> str:
         direction = "상승" if last["value"] > first["value"] else "하락" if last["value"] < first["value"] else "유지"
         lines.append(f"{last['label']}은 {first['year']}년 {first['display']}에서 {last['year']}년 {last['display']}로 {direction}했습니다.")
 
-    lines.append("계산에는 보유 재무제표의 매출액, 영업이익, 당기순이익 데이터를 사용했습니다.")
+    lines.append("계산에는 보유 재무제표의 손익계산서와 재무상태표 주요 계정을 사용했습니다.")
     return "\n".join(lines)
 
 
@@ -78,6 +91,9 @@ def build_company_accounts_answer(calculation: dict) -> str:
     company_name = company.get("company_name", "해당 기업")
     account_order = [
         "revenue",
+        "cost_of_sales",
+        "gross_profit",
+        "selling_admin_expenses",
         "operating_income",
         "net_income",
         "total_assets",
@@ -97,6 +113,8 @@ def build_company_accounts_answer(calculation: dict) -> str:
 
     ratio_lines = []
     ratio_labels = {
+        "cost_of_sales_ratio": "매출원가율",
+        "selling_admin_expense_ratio": "판관비율",
         "operating_margin": "매출액영업이익률",
         "net_margin": "매출액순이익률",
         "debt_to_equity": "부채비율",
@@ -110,6 +128,45 @@ def build_company_accounts_answer(calculation: dict) -> str:
     if ratio_lines:
         lines.append("주요 비율은 " + ", ".join(ratio_lines) + "입니다.")
 
+    return "\n".join(lines)
+
+
+def build_company_comparison_answer(calculation: dict) -> str:
+    comparison = calculation.get("comparison") or []
+    if not comparison:
+        return calculation.get("summary") or "비교할 기업 데이터를 찾지 못했습니다."
+    lines = ["질문에 나온 순서대로 각 기업을 먼저 계산한 뒤 비교했습니다."]
+    for index, item in enumerate(comparison, start=1):
+        company = item.get("company") or {}
+        period = item.get("period") or {}
+        name = company.get("company_name", f"{index}번째 기업")
+        lines.append(f"{index}. {name}({company.get('stock_code', '-')})")
+        if period:
+            lines.append(f"기간: {period.get('start_year')}~{period.get('end_year')}년")
+        if item.get("ratio_series"):
+            latest = item["ratio_series"][-1]
+            values = []
+            for key, value in latest.items():
+                if key != "year" and isinstance(value, dict):
+                    values.append(f"{value['label']} {value['display']}")
+            if values:
+                lines.append(f"{latest['year']}년 기준: " + ", ".join(values))
+        elif item.get("ratio_keys"):
+            dart_fetch = item.get("dart_fetch") or {}
+            if dart_fetch.get("status") and dart_fetch.get("status") != "ok":
+                lines.append(
+                    "수익성 비율 계산에 필요한 매출액, 영업이익 또는 당기순이익 데이터가 부족합니다. "
+                    f"{dart_fetch.get('message', '')}".strip()
+                )
+            else:
+                lines.append("수익성 비율 계산에 필요한 매출액, 영업이익 또는 당기순이익 데이터가 부족합니다.")
+        elif item.get("metrics"):
+            for metric in item["metrics"]:
+                lines.append(
+                    f"{metric['label']}: {metric['start_year']}년 {_format_display_amount(metric['start_amount'])} -> "
+                    f"{metric['end_year']}년 {_format_display_amount(metric['end_amount'])}"
+                )
+    lines.append("비교 결과는 보유 재무제표 기준이며, 투자 추천이나 목표주가 의견은 아닙니다.")
     return "\n".join(lines)
 
 
@@ -130,6 +187,9 @@ def _format_display_ratio(value: float) -> str:
 
 
 def build_industry_rank_answer(calculation: dict) -> str:
+    if calculation.get("mode") == "industry_group":
+        return build_industry_group_answer(calculation)
+
     ranking = calculation.get("ranking") or []
     industry = calculation.get("industry") or "산업"
     year = calculation.get("year")
@@ -143,6 +203,22 @@ def build_industry_rank_answer(calculation: dict) -> str:
             f"매출액 {row['revenue_display']}, 업종 {row.get('industry_name') or '-'}"
         )
     lines.append("분류는 회사명 또는 업종명 키워드 기준이므로, 공식 산업 분류와는 차이가 있을 수 있습니다.")
+    return "\n".join(lines)
+
+
+def build_industry_group_answer(calculation: dict) -> str:
+    groups = calculation.get("groups") or []
+    if not groups:
+        return calculation.get("summary") or "업종 그룹을 찾지 못했습니다."
+
+    lines = [calculation.get("summary") or "업종명 기준으로 기업을 그룹화했습니다."]
+    for group in groups[:8]:
+        companies = group.get("companies") or []
+        names = ", ".join(f"{item['company_name']}({item['stock_code']})" for item in companies[:8])
+        lines.append(f"- {group.get('industry_name') or '-'}: {group.get('count', len(companies))}개 기업")
+        if names:
+            lines.append(f"  예시: {names}")
+    lines.append("업종 그룹은 재무제표 데이터의 표준 업종명 기준이며, 사용자가 말한 산업군과 완전히 일치하지 않을 수 있습니다.")
     return "\n".join(lines)
 
 

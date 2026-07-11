@@ -5,6 +5,9 @@ from typing import Any
 
 CHART_ACCOUNT_ORDER = [
     "revenue",
+    "cost_of_sales",
+    "gross_profit",
+    "selling_admin_expenses",
     "operating_income",
     "net_income",
     "operating_cash_flow",
@@ -78,7 +81,12 @@ def _build_ratio_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
         return None
 
     datasets = []
-    for ratio_key in ["operating_margin", "net_margin"]:
+    ratio_keys = []
+    for row in ratio_rows:
+        for key, value in row.items():
+            if key != "year" and isinstance(value, dict) and key not in ratio_keys:
+                ratio_keys.append(key)
+    for ratio_key in ratio_keys:
         points = []
         label = None
         for row in ratio_rows:

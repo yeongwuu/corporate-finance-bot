@@ -12,6 +12,18 @@
     "code_exact": ["ifrs-full_GrossProfit", "ifrs_GrossProfit"],
     "name_exact": ["매출총이익"]
   },
+  "cost_of_sales": {
+    "label": "매출원가",
+    "statements": ["PL"],
+    "name_exact": ["매출원가"],
+    "name_contains": ["매출원가"]
+  },
+  "selling_admin_expenses": {
+    "label": "판매비와관리비",
+    "statements": ["PL"],
+    "name_exact": ["판매비와관리비", "판매비와 관리비", "판매비및관리비", "판매비와일반관리비", "판매 및 일반관리비"],
+    "name_contains": ["판매비와관리비", "판매비와 관리비", "판매비및관리비", "판매 및 일반관리비"]
+  },
   "operating_income": {
     "label": "영업이익",
     "statements": ["PL"],

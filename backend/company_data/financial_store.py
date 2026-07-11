@@ -467,6 +467,8 @@ def _calculate_ratios(accounts: dict[str, Any], previous_accounts: dict[str, Any
     previous_revenue = _amount(previous_accounts.get("revenue"))
     operating_income = _amount(accounts.get("operating_income"))
     net_income = _amount(accounts.get("net_income"))
+    cost_of_sales = _amount(accounts.get("cost_of_sales"))
+    selling_admin_expenses = _amount(accounts.get("selling_admin_expenses"))
     total_liabilities = _amount(accounts.get("total_liabilities"))
     total_equity = _amount(accounts.get("total_equity"))
     current_assets = _amount(accounts.get("current_assets"))
@@ -475,6 +477,8 @@ def _calculate_ratios(accounts: dict[str, Any], previous_accounts: dict[str, Any
 
     return {
         "revenue_growth": _safe_divide(revenue - previous_revenue, abs(previous_revenue)) if revenue is not None and previous_revenue not in (None, 0) else None,
+        "cost_of_sales_ratio": _safe_divide(cost_of_sales, revenue),
+        "selling_admin_expense_ratio": _safe_divide(selling_admin_expenses, revenue),
         "operating_margin": _safe_divide(operating_income, revenue),
         "net_margin": _safe_divide(net_income, revenue),
         "debt_to_equity": _safe_divide(total_liabilities, total_equity),

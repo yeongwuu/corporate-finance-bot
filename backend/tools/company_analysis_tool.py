@@ -11,6 +11,9 @@ from rag.external_rag import search_external_docs
 
 MAJOR_ACCOUNT_ORDER = [
     "revenue",
+    "cost_of_sales",
+    "gross_profit",
+    "selling_admin_expenses",
     "operating_income",
     "net_income",
     "total_assets",
@@ -147,7 +150,10 @@ def _try_fetch_dart_accounts(result: dict[str, Any], requested_year: int | None)
 
 def _map_dart_accounts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     rules = {
-        "revenue": ("매출액", ["매출액", "영업수익", "수익(매출액)"]),
+        "revenue": ("매출액", ["매출", "매출액", "영업수익", "수익(매출액)"]),
+        "cost_of_sales": ("매출원가", ["매출원가"]),
+        "gross_profit": ("매출총이익", ["매출총이익", "매출총이익(손실)"]),
+        "selling_admin_expenses": ("판매비와관리비", ["판매비와관리비", "판매비와 관리비", "판매비및관리비", "판매 및 일반관리비"]),
         "operating_income": ("영업이익", ["영업이익", "영업이익(손실)"]),
         "net_income": ("당기순이익", ["당기순이익", "당기순이익(손실)"]),
         "total_assets": ("자산총계", ["자산총계", "자산 총계"]),
@@ -194,11 +200,15 @@ def _calculate_basic_ratios(accounts: dict[str, Any]) -> dict[str, float | None]
     revenue = amount("revenue")
     operating_income = amount("operating_income")
     net_income = amount("net_income")
+    cost_of_sales = amount("cost_of_sales")
+    selling_admin_expenses = amount("selling_admin_expenses")
     total_liabilities = amount("total_liabilities")
     total_equity = amount("total_equity")
     current_assets = amount("current_assets")
     current_liabilities = amount("current_liabilities")
     return {
+        "cost_of_sales_ratio": _safe_divide(cost_of_sales, revenue),
+        "selling_admin_expense_ratio": _safe_divide(selling_admin_expenses, revenue),
         "operating_margin": _safe_divide(operating_income, revenue),
         "net_margin": _safe_divide(net_income, revenue),
         "debt_to_equity": _safe_divide(total_liabilities, total_equity),

@@ -213,6 +213,12 @@ def select_tool(question: str) -> str:
     if _is_market_news_question(normalized):
         return "company_trend_tool"
 
+    if _is_company_financial_comparison_question(normalized):
+        return "company_trend_tool"
+
+    if _is_company_profitability_trend_question(normalized):
+        return "company_trend_tool"
+
     if any(word in normalized for word in ["비교기업", "대용기업", "투자안 베타", "프로젝트 베타", "조정현가", "apv", "목표 부채", "부채비율 유지", "이자비용 절세효과의 현재가치", "이자비용 절세효과 현재가치"]):
         return "capital_budgeting_tool"
     if any(word in normalized for word in ["m&a", "m＆a", "인수합병", "인수 합병", "합병", "흡수합병", "신설합병", "수직적 합병", "수평적 합병", "다각적 합병", "공개매수", "공개 매수", "곰의 포옹", "새벽의 기습", "lbo", "mbo", "차입매수", "차입 매수", "경영자매수", "적대적", "독약조항", "독약 풋", "황금낙하산", "백기사", "백지주", "황금주", "차등의결권", "팩맨", "왕관의 보석", "녹색편지", "행동주의 펀드", "토빈의 q", "저평가 가설", "경영자주의", "시너지 효과", "시너지 계산", "피인수기업", "경제성 평가", "인수 대가", "인수프리미엄", "합병 프리미엄", "주식교환", "주식 교환", "교환비율", "교환 비율", "현금지급", "현금 지급", "eps법", "주가법", "합병 후 eps", "합병후 eps", "합병 후 주가", "합병후 주가", "프리미엄률", "배당성장", "포이즌필", "포이즌 필", "신주인수권", "부의 이전", "무임승차", "사업구조 변경", "합병 후 표준편차", "합병 후 베타"]):
@@ -551,9 +557,71 @@ def _is_stock_price_question(normalized: str) -> bool:
 
 
 def _is_industry_rank_question(normalized: str) -> bool:
+    compact = normalized.replace(" ", "")
+    direct_terms = [
+        "업종별",
+        "산업군",
+        "그룹화",
+        "그룹핑",
+        "같은업종",
+        "속한업종",
+        "무슨업종",
+        "어떤업종",
+        "어느업종",
+        "무슨산업",
+        "어떤산업",
+        "어느산업",
+    ]
+    if any(term in compact for term in direct_terms):
+        return True
     rank_terms = ["상위", "top", "순위", "랭킹", "랭크"]
-    group_terms = ["산업", "업종", "섹터", "기업", "회사"]
+    group_terms = ["산업", "업종", "섹터", "기업", "회사", "산업군"]
     return any(term in normalized for term in rank_terms) and any(term in normalized for term in group_terms)
+
+
+def _is_company_financial_comparison_question(normalized: str) -> bool:
+    comparison_terms = ["비교", "vs", "대비"]
+    financial_terms = [
+        "매출",
+        "영업이익",
+        "순이익",
+        "이익률",
+        "원가율",
+        "판관비율",
+        "수익성",
+        "roe",
+        "roa",
+        "자산",
+        "부채",
+        "재무",
+        "실적",
+    ]
+    return any(term in normalized for term in comparison_terms) and any(term in normalized for term in financial_terms)
+
+
+def _is_company_profitability_trend_question(normalized: str) -> bool:
+    ratio_terms = [
+        "수익성",
+        "이익률",
+        "영업마진",
+        "순이익마진",
+        "원가율",
+        "매출원가율",
+        "판관비율",
+        "판매비와관리비율",
+        "판매관리비율",
+        "매출원가",
+        "판관비",
+        "grossmargin",
+        "operatingmargin",
+        "netmargin",
+        "roe",
+        "roa",
+        "총자산이익률",
+        "자기자본이익률",
+    ]
+    trend_terms = ["추이", "최근", "연도별", "계산", "분석"]
+    return any(term in normalized for term in ratio_terms) and any(term in normalized for term in trend_terms)
 
 
 def run_tool(tool_name: str, question: str) -> dict:

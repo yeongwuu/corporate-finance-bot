@@ -8,17 +8,56 @@ from company_data.financial_store import FinancialStatementStore
 from dart_client import DartClient, load_dart_api_key
 from news_client import NewsClient, get_env as get_news_env
 from rag.external_rag import search_external_docs
-from tools.company_analysis_tool import _format_amount, _format_ratio
+from tools.company_analysis_tool import _format_amount, _format_ratio, _map_dart_accounts
 
 
 ACCOUNT_LABELS = {
     "revenue": "매출액",
+    "gross_profit": "매출총이익",
+    "cost_of_sales": "매출원가",
+    "selling_admin_expenses": "판매비와관리비",
     "operating_income": "영업이익",
     "net_income": "당기순이익",
     "operating_cash_flow": "영업활동현금흐름",
     "total_assets": "자산총계",
     "total_liabilities": "부채총계",
     "total_equity": "자본총계",
+}
+
+
+PROFITABILITY_RATIO_DEFINITIONS = {
+    "cost_of_sales_ratio": {
+        "label": "매출원가율",
+        "required": ["revenue", "cost_of_sales"],
+    },
+    "gross_margin": {
+        "label": "매출액총이익률",
+        "required": ["revenue", "gross_profit"],
+    },
+    "selling_admin_expense_ratio": {
+        "label": "판관비율",
+        "required": ["revenue", "selling_admin_expenses"],
+    },
+    "operating_margin": {
+        "label": "매출액영업이익률",
+        "required": ["revenue", "operating_income"],
+    },
+    "net_margin": {
+        "label": "매출액순이익률",
+        "required": ["revenue", "net_income"],
+    },
+    "roa": {
+        "label": "ROA",
+        "required": ["net_income", "total_assets"],
+    },
+    "roe": {
+        "label": "ROE",
+        "required": ["net_income", "total_equity"],
+    },
+    "operating_roa": {
+        "label": "총자본영업이익률",
+        "required": ["operating_income", "total_assets"],
+    },
 }
 
 
@@ -33,9 +72,10 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     store = FinancialStatementStore()
     news_requested = _should_fetch_news(question)
     try:
-        comparison_companies = _resolve_comparison_companies(store, question) if news_requested else []
+        comparison_companies = _resolve_comparison_companies(store, question) if _is_company_comparison_question(question) else []
         if len(comparison_companies) >= 2:
-            return _analyze_market_comparison(question, store, comparison_companies[:3])
+            limit = 7 if _asks_defense_peer_group(question) else 3
+            return _analyze_market_comparison(question, store, comparison_companies[:limit])
         company = store.resolve_company(question)
     except FileNotFoundError as exc:
         return {
@@ -329,6 +369,28 @@ def _news_documents_only(documents: list[dict]) -> list[dict]:
 
 def _resolve_comparison_companies(store: FinancialStatementStore, question: str) -> list[Any]:
     candidates = []
+    seen = set()
+    if _asks_defense_peer_group(question):
+        target = store.resolve_company(question)
+        if target:
+            seen.add(target.stock_code)
+            candidates.append(target)
+        for name in ["한화에어로스페이스", "한국항공우주", "LIG넥스원", "한화시스템", "현대로템", "SNT다이내믹스", "퍼스텍"]:
+            company = store.resolve_company(name)
+            if company and company.stock_code not in seen:
+                seen.add(company.stock_code)
+                candidates.append(company)
+        return candidates
+
+    chunks = re.split(r"\s*(?:와|과|랑|하고|및|vs\.?|VS|비교)\s*", question)
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        company = store.resolve_company(chunk)
+        if company and company.stock_code not in seen:
+            seen.add(company.stock_code)
+            candidates.append(company)
+
     aliases = [
         "삼성전자",
         "SK하이닉스",
@@ -346,9 +408,22 @@ def _resolve_comparison_companies(store: FinancialStatementStore, question: str)
             continue
         query = "SK하이닉스" if alias.lower() == "하이닉스" else alias
         company = store.resolve_company(query)
-        if company and company.stock_code and company.stock_code not in {item.stock_code for item in candidates}:
+        if company and company.stock_code and company.stock_code not in seen:
+            seen.add(company.stock_code)
             candidates.append(company)
     return candidates
+
+
+def _asks_defense_peer_group(question: str) -> bool:
+    compact = question.replace(" ", "")
+    return any(token in compact for token in ["방산기업", "방위산업", "방산업체", "방산주"])
+
+
+def _is_company_comparison_question(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    return any(token in compact for token in ["비교", "vs", "대비"]) and not any(
+        token in compact for token in ["비교기업", "대용기업"]
+    )
 
 
 def _analyze_market_comparison(question: str, store: FinancialStatementStore, companies: list[Any]) -> dict[str, Any]:
@@ -360,15 +435,25 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
         if not available_years:
             continue
         period = _extract_period(question, available_years)
-        account_keys = ["revenue", "operating_income", "net_income"]
+        ratio_keys = _extract_ratio_accounts(question)
+        account_keys = _extract_accounts(question, ratio_keys) if ratio_keys else ["revenue", "operating_income", "net_income"]
         series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
-        metrics = _build_metric_summary(series, account_keys)
+        ratio_series = _build_ratio_series(series, ratio_keys)
+        dart_fetch = None
+        if ratio_keys and not ratio_series:
+            dart_fetch, dart_ratio_row = _try_build_dart_ratio_row(company, period.end_year, ratio_keys)
+            if dart_ratio_row:
+                ratio_series = [dart_ratio_row]
+        metrics = [] if ratio_series else _build_metric_summary(series, account_keys)
         company_summaries.append(
             {
                 "company": company.__dict__,
                 "period": period.__dict__,
                 "series": series,
+                "ratio_series": ratio_series,
+                "ratio_keys": ratio_keys,
                 "metrics": metrics,
+                "dart_fetch": dart_fetch,
             }
         )
         if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
@@ -392,7 +477,11 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
         company = item["company"]
         period = item["period"]
         steps.append(f"{company['company_name']} 기간: {period['start_year']}~{period['end_year']}년")
-        steps.append(_format_series_table(item["series"], ["revenue", "operating_income", "net_income"]))
+        if item.get("ratio_series"):
+            steps.append(_format_ratio_series_table(item["ratio_series"]))
+            steps.extend(f"{company['company_name']} {line}" for line in _build_ratio_insights(item["ratio_series"]))
+        else:
+            steps.append(_format_series_table(item["series"], ["revenue", "operating_income", "net_income"]))
         if item["metrics"]:
             steps.append(f"{company['company_name']} 계산 요약: " + " | ".join(_format_metric(metric) for metric in item["metrics"]))
     for result in news_results:
@@ -403,7 +492,7 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
 
     return {
         "status": "ok",
-        "summary": "두 기업 중 어느 주가가 더 오를지 단정하지 않고, 최신 뉴스와 재무 추이를 나눠 비교해야 합니다.",
+        "summary": "질문에 나온 앞 기업부터 순서대로 재무 지표를 계산해 비교했습니다.",
         "steps": steps,
         "comparison": company_summaries,
         "external_references": documents,
@@ -422,16 +511,19 @@ def _clip_period(start_year: int, end_year: int, available_years: list[int], sou
 
 def _extract_accounts(question: str, ratio_keys: list[str] | None = None) -> list[str]:
     if ratio_keys:
-        required = ["revenue"]
-        if "operating_margin" in ratio_keys:
-            required.append("operating_income")
-        if "net_margin" in ratio_keys:
-            required.append("net_income")
+        required = []
+        for ratio_key in ratio_keys:
+            for account_key in PROFITABILITY_RATIO_DEFINITIONS[ratio_key]["required"]:
+                if account_key not in required:
+                    required.append(account_key)
         return required
 
     account_keys = []
     patterns = [
         ("revenue", ["매출", "영업수익", "revenue"]),
+        ("cost_of_sales", ["매출원가", "원가"]),
+        ("selling_admin_expenses", ["판매비와관리비", "판매비", "관리비", "판관비"]),
+        ("gross_profit", ["매출총이익", "gross profit"]),
         ("operating_income", ["영업이익", "operating income"]),
         ("net_income", ["순이익", "당기순이익", "net income"]),
         ("operating_cash_flow", ["영업활동현금흐름", "영업현금흐름", "cfo"]),
@@ -449,13 +541,31 @@ def _extract_accounts(question: str, ratio_keys: list[str] | None = None) -> lis
 def _extract_ratio_accounts(question: str) -> list[str]:
     compact = question.replace(" ", "").lower()
     ratio_keys = []
+    if any(token in compact for token in ["매출원가율", "원가율", "costofsalesratio", "cogsratio"]):
+        ratio_keys.append("cost_of_sales_ratio")
+    if any(token in compact for token in ["매출액총이익률", "매출총이익률", "grossmargin"]):
+        ratio_keys.append("gross_margin")
+    if any(token in compact for token in ["판관비율", "판매비와관리비율", "판매관리비율", "sg&a", "sgnaratio", "sellingadminratio"]):
+        ratio_keys.append("selling_admin_expense_ratio")
     if any(token in compact for token in ["매출액영업이익률", "영업이익률", "영업마진", "operatingmargin"]):
         ratio_keys.append("operating_margin")
     if any(token in compact for token in ["매출액순이익률", "순이익률", "순이익마진", "netmargin"]):
         ratio_keys.append("net_margin")
-    if any(token in compact for token in ["매출액이익률", "이익률추이", "수익성비율", "profitmargin"]) and not ratio_keys:
+    if any(token in compact for token in ["roa", "총자산이익률", "총자산순이익률"]):
+        ratio_keys.append("roa")
+    if any(token in compact for token in ["roe", "자기자본이익률", "자기자본순이익률"]):
+        ratio_keys.append("roe")
+    if any(token in compact for token in ["총자본영업이익률", "자산영업이익률"]):
+        ratio_keys.append("operating_roa")
+    if any(token in compact for token in ["매출액이익률", "profitmargin"]) and not ratio_keys:
         ratio_keys.extend(["operating_margin", "net_margin"])
-    return ratio_keys
+    if any(token in compact for token in ["이익률추이", "수익성비율", "수익성지표", "수익성분석"]) and not ratio_keys:
+        ratio_keys.extend(["cost_of_sales_ratio", "gross_margin", "selling_admin_expense_ratio", "operating_margin", "net_margin", "roa", "roe"])
+    deduped = []
+    for ratio_key in ratio_keys:
+        if ratio_key not in deduped:
+            deduped.append(ratio_key)
+    return deduped
 
 
 def _build_ratio_series(series: list[dict[str, Any]], ratio_keys: list[str]) -> list[dict[str, Any]]:
@@ -463,32 +573,87 @@ def _build_ratio_series(series: list[dict[str, Any]], ratio_keys: list[str]) -> 
         return []
     rows = []
     for row in series:
-        revenue = row.get("revenue", {}).get("amount")
-        if not revenue:
-            continue
         ratio_row: dict[str, Any] = {"year": row["year"]}
-        if "operating_margin" in ratio_keys and row.get("operating_income"):
-            ratio_row["operating_margin"] = {
-                "label": "매출액영업이익률",
-                "value": row["operating_income"]["amount"] / revenue,
-                "display": _format_ratio(row["operating_income"]["amount"] / revenue),
-            }
-        if "net_margin" in ratio_keys and row.get("net_income"):
-            ratio_row["net_margin"] = {
-                "label": "매출액순이익률",
-                "value": row["net_income"]["amount"] / revenue,
-                "display": _format_ratio(row["net_income"]["amount"] / revenue),
+        for ratio_key in ratio_keys:
+            value = _calculate_profitability_ratio(row, ratio_key)
+            if value is None:
+                continue
+            label = PROFITABILITY_RATIO_DEFINITIONS[ratio_key]["label"]
+            ratio_row[ratio_key] = {
+                "label": label,
+                "value": value,
+                "display": _format_ratio(value),
             }
         if len(ratio_row) > 1:
             rows.append(ratio_row)
     return rows
 
 
+def _calculate_profitability_ratio(row: dict[str, Any], ratio_key: str) -> float | None:
+    def amount(account_key: str) -> float | None:
+        item = row.get(account_key)
+        if not item:
+            return None
+        return item.get("amount")
+
+    if ratio_key == "cost_of_sales_ratio":
+        return _safe_ratio(amount("cost_of_sales"), amount("revenue"))
+    if ratio_key == "gross_margin":
+        return _safe_ratio(amount("gross_profit"), amount("revenue"))
+    if ratio_key == "selling_admin_expense_ratio":
+        return _safe_ratio(amount("selling_admin_expenses"), amount("revenue"))
+    if ratio_key == "operating_margin":
+        return _safe_ratio(amount("operating_income"), amount("revenue"))
+    if ratio_key == "net_margin":
+        return _safe_ratio(amount("net_income"), amount("revenue"))
+    if ratio_key == "roa":
+        return _safe_ratio(amount("net_income"), amount("total_assets"))
+    if ratio_key == "roe":
+        return _safe_ratio(amount("net_income"), amount("total_equity"))
+    if ratio_key == "operating_roa":
+        return _safe_ratio(amount("operating_income"), amount("total_assets"))
+    return None
+
+
+def _try_build_dart_ratio_row(company: Any, fiscal_year: int, ratio_keys: list[str]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not load_dart_api_key():
+        return (
+            {
+                "status": "missing_config",
+                "message": "로컬 재무제표에 손익계산서 데이터가 없어 DART_API_KEY가 필요합니다.",
+            },
+            None,
+        )
+    try:
+        result = DartClient().fetch_financial_accounts(
+            stock_code=getattr(company, "stock_code", None),
+            corp_name=getattr(company, "company_name", None),
+            fiscal_year=fiscal_year,
+        )
+    except Exception as exc:
+        return {"status": "error", "message": f"DART 재무제표 조회 실패: {exc}"}, None
+    if result.get("status") != "ok":
+        return result, None
+
+    accounts = _map_dart_accounts(result.get("accounts") or [])
+    row: dict[str, Any] = {"year": fiscal_year}
+    for key, account in accounts.items():
+        row[key] = account
+    ratio_rows = _build_ratio_series([row], ratio_keys)
+    return {"status": "ok", "source": "dart"}, ratio_rows[0] if ratio_rows else None
+
+
+def _safe_ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return numerator / denominator
+
+
 def _format_ratio_series_table(ratio_series: list[dict[str, Any]]) -> str:
     rows = []
     for row in ratio_series:
         values = []
-        for key in ["operating_margin", "net_margin"]:
+        for key in PROFITABILITY_RATIO_DEFINITIONS:
             item = row.get(key)
             if item:
                 values.append(f"{item['label']} {item['display']}")
@@ -498,7 +663,7 @@ def _format_ratio_series_table(ratio_series: list[dict[str, Any]]) -> str:
 
 def _build_ratio_insights(ratio_series: list[dict[str, Any]]) -> list[str]:
     insights = []
-    for key in ["operating_margin", "net_margin"]:
+    for key in PROFITABILITY_RATIO_DEFINITIONS:
         values = [row[key] | {"year": row["year"]} for row in ratio_series if row.get(key)]
         if len(values) < 2:
             continue
