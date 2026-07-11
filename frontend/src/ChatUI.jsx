@@ -1,16 +1,9 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const API_HOSTNAME = import.meta.env?.VITE_API_HOSTNAME;
 const API_URL =
   import.meta.env?.VITE_API_URL ||
   (API_HOSTNAME ? `https://${API_HOSTNAME}` : "http://localhost:8000");
-
-const SAMPLE_PROMPTS = [
-  "WACC와 APV 차이를 설명해줘",
-  "M&A 시너지 효과 계산 방법을 설명해줘",
-  "포이즌필 발효 후 지분율 계산 방법은?",
-  "포트폴리오 기대수익률과 표준편차 계산 방법을 설명해줘",
-];
 
 const INITIAL_MESSAGE = {
   role: "assistant",
@@ -26,8 +19,11 @@ export default function ChatUI() {
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStartedAt, setLoadingStartedAt] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [lastResult, setLastResult] = useState(null);
   const inputRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   const canSubmit = input.trim().length > 0 && !isLoading;
 
@@ -36,6 +32,21 @@ export default function ChatUI() {
     const assistantCount = messages.filter((message) => message.role === "assistant").length;
     return { userCount, assistantCount };
   }, [messages]);
+
+  useEffect(() => {
+    if (!isLoading || !loadingStartedAt) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - loadingStartedAt) / 1000)));
+    };
+
+    updateElapsed();
+    const timerId = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timerId);
+  }, [isLoading, loadingStartedAt]);
 
   async function sendMessage(nextInput = input) {
     const question = nextInput.trim();
@@ -51,13 +62,17 @@ export default function ChatUI() {
 
     setMessages(nextMessages);
     setInput("");
+    setLoadingStartedAt(Date.now());
     setIsLoading(true);
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     try {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
+        signal: abortController.signal,
       });
 
       const data = await response.json();
@@ -86,24 +101,27 @@ export default function ChatUI() {
         {
           role: "assistant",
           content:
-            error.message === "Failed to fetch"
-              ? "백엔드 서버에 연결하지 못했습니다."
-              : error.message,
+            error.name === "AbortError"
+              ? "요청을 취소했습니다."
+              : error.message === "Failed to fetch"
+                ? "백엔드 서버에 연결하지 못했습니다."
+                : error.message,
           meta: {
-            tool: "network",
-            status: "error",
+            tool: error.name === "AbortError" ? "cancelled" : "network",
+            status: error.name === "AbortError" ? "cancelled" : "error",
           },
         },
       ]);
     } finally {
+      abortControllerRef.current = null;
       setIsLoading(false);
+      setLoadingStartedAt(null);
       window.requestAnimationFrame(() => inputRef.current?.focus());
     }
   }
 
-  function handlePromptClick(prompt) {
-    setInput(prompt);
-    window.requestAnimationFrame(() => inputRef.current?.focus());
+  function cancelMessage() {
+    abortControllerRef.current?.abort();
   }
 
   return (
@@ -125,14 +143,6 @@ export default function ChatUI() {
           </div>
         </div>
 
-        <nav className="topic-list" aria-label="지원 주제">
-          <span>시간가치</span>
-          <span>투자안 평가</span>
-          <span>자본비용</span>
-          <span>포트폴리오</span>
-          <span>기업가치평가</span>
-          <span>M&A</span>
-        </nav>
       </aside>
 
       <section className="chat-panel" aria-label="채팅">
@@ -151,25 +161,25 @@ export default function ChatUI() {
             <article className="message assistant loading">
               <div className="message-header">
                 <strong>Assistant</strong>
-                <span>working</span>
+                <span className="loading-status">
+                  <span aria-hidden="true" className="hourglass">⌛</span>
+                  <span>{elapsedSeconds}s</span>
+                  <span>working</span>
+                </span>
               </div>
               <p>답변을 생성하고 있습니다.</p>
             </article>
           ) : null}
         </div>
 
-        <div className="prompt-row">
-          {SAMPLE_PROMPTS.map((prompt) => (
-            <button key={prompt} type="button" onClick={() => handlePromptClick(prompt)}>
-              {prompt}
-            </button>
-          ))}
-        </div>
-
         <form
           className="composer"
           onSubmit={(event) => {
             event.preventDefault();
+            if (isLoading) {
+              cancelMessage();
+              return;
+            }
             sendMessage();
           }}
         >
@@ -180,14 +190,20 @@ export default function ChatUI() {
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
+                if (isLoading) return;
                 sendMessage();
               }
             }}
             placeholder="재무관리 질문을 입력하세요"
             rows={3}
           />
-          <button type="submit" disabled={!canSubmit}>
-            {isLoading ? "전송 중" : "전송"}
+          <button
+            type={isLoading ? "button" : "submit"}
+            className={isLoading ? "cancel-button" : undefined}
+            disabled={!isLoading && !canSubmit}
+            onClick={isLoading ? cancelMessage : undefined}
+          >
+            {isLoading ? "취소" : "전송"}
           </button>
         </form>
       </section>

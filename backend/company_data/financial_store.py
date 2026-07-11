@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import gzip
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXCEL_PATH = PROJECT_ROOT / "KOSDAQ_financial_statements.xlsx"
 DEFAULT_DB_PATH = BACKEND_ROOT / "data" / "financials.sqlite"
+DEFAULT_PACKAGED_DB_PATH = BACKEND_ROOT / "data" / "financials.sqlite.gz"
 ACCOUNT_MAPPING_PATH = BACKEND_ROOT / "data" / "account_mapping.json"
 
 META_COLUMNS = [
@@ -47,15 +50,19 @@ class FinancialStatementStore:
         excel_path: Path = DEFAULT_EXCEL_PATH,
         db_path: Path = DEFAULT_DB_PATH,
         mapping_path: Path = ACCOUNT_MAPPING_PATH,
+        packaged_db_path: Path = DEFAULT_PACKAGED_DB_PATH,
     ) -> None:
         self.excel_path = excel_path
         self.db_path = db_path
         self.mapping_path = mapping_path
+        self.packaged_db_path = packaged_db_path
 
     def ensure_database(self) -> None:
         if not self.excel_path.exists():
             raise FileNotFoundError(f"Excel file not found: {self.excel_path}")
         if self._database_is_fresh():
+            return
+        if self._restore_packaged_database():
             return
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +199,20 @@ class FinancialStatementStore:
 
     def _database_is_fresh(self) -> bool:
         return self.db_path.exists() and self.db_path.stat().st_mtime >= self.excel_path.stat().st_mtime
+
+    def _restore_packaged_database(self) -> bool:
+        if not self.packaged_db_path.exists():
+            return False
+
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.db_path.with_suffix(".sqlite.tmp")
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+        with gzip.open(self.packaged_db_path, "rb") as src, tmp_path.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        tmp_path.replace(self.db_path)
+        return True
 
     def _import_excel(self, conn: sqlite3.Connection) -> None:
         workbook = pd.ExcelFile(self.excel_path)

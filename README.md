@@ -1,5 +1,7 @@
 # corporate-finance-bot
 
+배포 URL: https://corporate-finance-bot-web.onrender.com
+
 재무관리 질문을 처리하기 위한 RAG + LLM + Python 계산 Tool 기반 챗봇입니다.
 재무관리 이론 질의, 계산형 문제, KOSDAQ 재무제표 기반 기업 분석, DART/뉴스 원문 기반 추이 분석을 지원합니다.
 
@@ -71,6 +73,7 @@ backend/
 - `KOSDAQ_financial_statements.xlsx`: 커밋 대상 축소본입니다. 포함 시트는 `2019_BS`~`2025_CF`이며 자본변동표(`*_CE`)는 제외합니다. 파일 크기를 줄이기 위해 회사/시장/업종/계정/당기 금액 조회에 필요한 최소 컬럼만 유지합니다.
 - `KOSDAQ_financial_statements.full.xlsx`: 로컬 전용 전체 원본 백업 파일입니다.
 - `backend/data/financials.sqlite`: 엑셀에서 생성되는 로컬 캐시이며 git에 커밋하지 않습니다.
+- `backend/data/financials.sqlite.gz`: 배포용 압축 SQLite 캐시입니다. Render에서 첫 재무제표 질문이 엑셀 파싱 때문에 느려지는 문제를 줄이기 위해 커밋합니다.
 - `backend/data/account_mapping.json`: 주요 계정 추출 규칙이므로 git에 커밋합니다.
 - `backend/external_docs/_how_to_add_sources.md`: 외부문서 추가 방법 문서이므로 git에 커밋합니다.
 - `backend/external_docs/*.md`, `backend/external_docs/*.txt`: DART/뉴스 수집 결과이므로 git에 커밋하지 않습니다.
