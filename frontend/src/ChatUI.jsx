@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 
 const API_HOSTNAME = import.meta.env?.VITE_API_HOSTNAME;
 const API_URL =
@@ -266,6 +268,10 @@ function MessageText({ message }) {
     return () => window.clearInterval(timerId);
   }, [message.content, message.meta?.animate]);
 
+  if (message.role === "user") {
+    return <p>{visibleText}</p>;
+  }
+
   return <div className="message-body">{formatAnswerText(visibleText)}</div>;
 }
 
@@ -273,7 +279,7 @@ function formatAnswerText(text) {
   if (!text) return null;
 
   return text.split(/\n{2,}/).map((block, blockIndex) => {
-    const lines = block.split("\n").filter(Boolean);
+    const lines = block.split("\n").map(cleanDisplayLine).filter(Boolean);
     if (lines.length === 1) {
       return renderAnswerLine(lines[0], `${blockIndex}-0`);
     }
@@ -291,11 +297,11 @@ function renderAnswerLine(line, key) {
     return (
       <p className="answer-heading" key={key}>
         <span aria-hidden="true">{heading.icon}</span>
-        <strong>{line}</strong>
+        <strong>{renderInlineMath(line)}</strong>
       </p>
     );
   }
-  return <p key={key}>{line}</p>;
+  return <p key={key}>{renderInlineMath(line)}</p>;
 }
 
 function getHeadingMeta(line) {
@@ -312,6 +318,63 @@ function getHeadingMeta(line) {
     { tokens: ["기간:"], icon: "🏢" },
   ];
   return headingRules.find((rule) => rule.tokens.some((token) => trimmed.includes(token)));
+}
+
+function cleanDisplayLine(line) {
+  return line
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .trim();
+}
+
+function renderInlineMath(text) {
+  const parts = splitMathSegments(text);
+  return parts.map((part, index) => {
+    if (!part.math) return <React.Fragment key={index}>{part.value}</React.Fragment>;
+    return <MathFormula key={index} expression={part.value} displayMode={part.displayMode} />;
+  });
+}
+
+function splitMathSegments(text) {
+  const segments = [];
+  const pattern = /(\$\$[^$]+\$\$|\$[^$\n]+\$|\\\([^)]*\\\)|\\\[[\s\S]*?\\\])/g;
+  let lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > lastIndex) {
+      segments.push({ math: false, value: text.slice(lastIndex, match.index) });
+    }
+    const token = match[0];
+    const displayMode = token.startsWith("$$") || token.startsWith("\\[");
+    segments.push({ math: true, displayMode, value: unwrapMathToken(token) });
+    lastIndex = match.index + token.length;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ math: false, value: text.slice(lastIndex) });
+  }
+  return segments;
+}
+
+function unwrapMathToken(token) {
+  if (token.startsWith("$$")) return token.slice(2, -2).trim();
+  if (token.startsWith("$")) return token.slice(1, -1).trim();
+  if (token.startsWith("\\(")) return token.slice(2, -2).trim();
+  if (token.startsWith("\\[")) return token.slice(2, -2).trim();
+  return token;
+}
+
+function MathFormula({ expression, displayMode }) {
+  try {
+    const html = katex.renderToString(expression, {
+      displayMode,
+      throwOnError: false,
+      strict: false,
+    });
+    const className = displayMode ? "math-formula display" : "math-formula";
+    return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  } catch {
+    return <code className="math-fallback">{expression}</code>;
+  }
 }
 
 function formatNewsStatus(calculation) {

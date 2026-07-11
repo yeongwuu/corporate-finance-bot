@@ -17,8 +17,9 @@ from tools.working_capital_tool import analyze_working_capital
 
 def answer_finance_question(question: str) -> dict:
     tool_name = select_tool(question)
-    references = search_knowledge(question)
+    knowledge_references = search_knowledge(question)
     calculation = run_tool(tool_name, question)
+    references = _combined_references(calculation, knowledge_references)
     answer = build_final_answer(
         question=question,
         tool_name=tool_name,
@@ -36,6 +37,23 @@ def answer_finance_question(question: str) -> dict:
     }
 
 
+def _combined_references(calculation: dict, knowledge_references: list[dict]) -> list[dict]:
+    external_references = calculation.get("external_references") or []
+    seen = set()
+    combined = []
+    for reference in [*external_references, *knowledge_references]:
+        key = (
+            reference.get("title"),
+            reference.get("source_url"),
+            reference.get("snippet"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        combined.append(reference)
+    return combined
+
+
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
@@ -49,8 +67,8 @@ def select_tool(question: str) -> str:
         return "mergers_acquisitions_tool"
 
     if (
-        any(word in normalized for word in ["추이", "성장률", "cagr", "연도별", "기간별", "원인", "이유", "왜", "인사이트", "사업보고서", "뉴스"])
-        and any(word in normalized for word in ["매출", "영업이익", "순이익", "현금흐름", "자산", "부채", "자본", "재무제표", "기업"])
+        any(word in normalized for word in ["추이", "성장률", "cagr", "연도별", "기간별", "원인", "이유", "왜", "인사이트", "사업보고서", "뉴스", "최근", "최신", "분기", "분기실적"])
+        and any(word in normalized for word in ["매출", "영업이익", "순이익", "현금흐름", "자산", "부채", "자본", "재무제표", "기업", "실적"])
         and not any(word in normalized for word in ["문제", "계산하시오", "구하시오", "공식"])
     ):
         return "company_trend_tool"

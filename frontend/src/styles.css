@@ -229,13 +229,40 @@ h2 {
   align-items: center;
   gap: 7px;
   margin-top: 2px;
-  color: var(--accent-dark);
+  color: #182026;
   line-height: 1.35;
   font-size: 17px;
 }
 
 .message-body .answer-heading strong {
   font-weight: 800;
+}
+
+.math-formula {
+  display: inline-block;
+  padding: 1px 3px;
+  color: #182026;
+  vertical-align: middle;
+}
+
+.math-formula.display {
+  display: block;
+  max-width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  padding: 8px 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.math-fallback {
+  padding: 2px 5px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: #182026;
+  font-size: 0.95em;
 }
 
 .message.user .message-body .answer-heading {

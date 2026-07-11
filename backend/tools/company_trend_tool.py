@@ -58,6 +58,51 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
             "steps": [],
         }
 
+    if _asks_latest_quarter(question):
+        latest_year = max(available_years)
+        news_fetch_result = None
+        documents = []
+        if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+            news_fetch_result = _try_fetch_latest_quarter_news(company, question)
+            if news_fetch_result.get("status") == "ok":
+                documents = _news_documents_only(
+                    search_external_docs(news_fetch_result.get("query", question), company.company_name, limit=10)
+                )[:5]
+        else:
+            news_fetch_result = {
+                "status": "missing_config",
+                "message": "최신 분기 실적 확인에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+            }
+        if documents:
+            steps = [
+                f"뉴스 검색 대상: {company.company_name}",
+                "최신 분기 실적은 보유 엑셀 데이터가 아니라 뉴스/공시 근거를 우선 확인했습니다.",
+                "RAG 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:5]),
+            ]
+            return {
+                "status": "latest_news",
+                "summary": f"{company.company_name}의 최신 분기 실적 관련 뉴스 근거를 확인했습니다.",
+                "steps": steps,
+                "company": company.__dict__,
+                "external_references": documents,
+                "news_fetch": news_fetch_result,
+            }
+        return {
+            "status": "needs_latest_disclosure",
+            "summary": (
+                f"현재 보유한 재무제표 데이터는 {latest_year}년 연간 데이터까지라서 "
+                f"{company.company_name}의 가장 최근 분기 영업이익은 직접 확인할 수 없습니다."
+            ),
+            "steps": [
+                "가장 최신의 정확한 분기 실적은 DART의 잠정실적 공시, 분기보고서 또는 회사 IR 실적 발표 자료에서 확인해야 합니다.",
+                "특정 과거 연도나 보유 데이터 범위의 연간 영업이익은 회사명과 연도를 함께 질문하면 조회할 수 있습니다.",
+            ],
+            "company": company.__dict__,
+            "available_years": available_years,
+            "external_references": documents,
+            "news_fetch": news_fetch_result,
+        }
+
     period = _extract_period(question, available_years)
     account_keys = _extract_accounts(question)
     series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
@@ -69,19 +114,21 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         }
 
     metrics = _build_metric_summary(series, account_keys)
-    documents = [] if news_requested else search_external_docs(question, company.company_name, limit=5)
-    dart_fetch_result = None
     news_fetch_result = None
-    if news_requested:
-        if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
-            news_fetch_result = _try_fetch_news(company, question)
-            if news_fetch_result.get("status") == "ok":
-                documents = search_external_docs(question, company.company_name, limit=5)
-        else:
-            news_fetch_result = {
-                "status": "missing_config",
-                "message": "최근 주가/뉴스 원인 분석에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
-            }
+    documents = []
+    if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+        news_fetch_result = _try_fetch_news(company, question)
+        if news_fetch_result.get("status") == "ok":
+            documents = _news_documents_only(search_external_docs(news_fetch_result.get("query", question), company.company_name, limit=10))[:5]
+    else:
+        news_fetch_result = {
+            "status": "missing_config",
+            "message": "뉴스 근거 수집에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+        }
+
+    dart_fetch_result = None
+    if not documents and not news_requested:
+        documents = search_external_docs(question, company.company_name, limit=5)
     if not documents and not news_requested and load_dart_api_key():
         dart_fetch_result = _try_fetch_dart_report(company, period.end_year)
         if dart_fetch_result.get("status") == "ok":
@@ -180,20 +227,81 @@ def _should_fetch_news(question: str) -> bool:
             "약세",
             "호재",
             "악재",
+            "잠정실적",
+            "분기실적",
+            "분기 영업이익",
+            "최신 분기",
+            "최근 분기",
         ]
+    )
+
+
+def _asks_latest_quarter(question: str) -> bool:
+    lowered = question.lower()
+    return any(token in lowered for token in ["최근 분기", "최신 분기", "분기 영업이익", "분기실적", "1분기", "2분기", "3분기", "4분기"]) and any(
+        token in lowered for token in ["영업이익", "실적", "매출", "순이익"]
     )
 
 
 def _try_fetch_news(company: Any, question: str) -> dict[str, Any]:
     company_name = getattr(company, "company_name", None)
-    query = f"{company_name or ''} {question}".strip()
+    query = _news_query(company_name, question)
     try:
-        return NewsClient().save_news_for_rag(query, company_name=company_name, display=10)
+        result = NewsClient().save_news_for_rag(query, company_name=company_name, display=10)
+        result["query"] = query
+        return result
     except Exception as exc:
         return {
             "status": "error",
             "message": "뉴스 API 호출에 실패했습니다. 배포 환경의 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 설정과 외부 네트워크 연결을 확인해야 합니다.",
         }
+
+
+def _try_fetch_latest_quarter_news(company: Any, question: str) -> dict[str, Any]:
+    company_name = getattr(company, "company_name", None)
+    queries = _latest_quarter_news_queries(company_name, question)
+    last_result = None
+    for query in queries:
+        result = _try_fetch_news(company, query)
+        result["query"] = query
+        if result.get("status") == "ok":
+            return result
+        last_result = result
+    return last_result or {"status": "not_found", "message": "뉴스 검색 결과가 없습니다.", "query": queries[0] if queries else question}
+
+
+def _news_query(company_name: str | None, question: str) -> str:
+    question = _normalize_short_year(question)
+    if company_name and company_name in question:
+        return question.strip()
+    return f"{company_name or ''} {question}".strip()
+
+
+def _latest_quarter_news_query(company_name: str | None, question: str) -> str:
+    return _latest_quarter_news_queries(company_name, question)[0]
+
+
+def _latest_quarter_news_queries(company_name: str | None, question: str) -> list[str]:
+    normalized = _news_query(company_name, question)
+    extras = ["잠정실적", "2분기", "영업이익", "매출"]
+    for token in extras:
+        if token not in normalized:
+            normalized = f"{normalized} {token}"
+    base_company = company_name or ""
+    return [
+        normalized.strip(),
+        f"{base_company} 2분기 잠정실적 영업이익".strip(),
+        f"{base_company} 잠정실적 영업이익".strip(),
+        f"{base_company} 분기 영업이익".strip(),
+    ]
+
+
+def _normalize_short_year(text: str) -> str:
+    return re.sub(r"(?<!\d)(2[0-9])년", lambda match: f"20{match.group(1)}년", text)
+
+
+def _news_documents_only(documents: list[dict]) -> list[dict]:
+    return [doc for doc in documents if str(doc.get("title", "")).startswith("news_")]
 
 
 def _resolve_comparison_companies(store: FinancialStatementStore, question: str) -> list[Any]:
@@ -244,7 +352,7 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
             news_result = _try_fetch_news(company, question)
             news_results.append({"company": company.company_name, **news_result})
             if news_result.get("status") == "ok":
-                documents.extend(search_external_docs(question, company.company_name, limit=3))
+                documents.extend(_news_documents_only(search_external_docs(news_result.get("query", question), company.company_name, limit=10))[:3])
         else:
             news_results.append(
                 {

@@ -14,6 +14,11 @@ PROJECT_ROOT = BACKEND_ROOT.parent
 
 
 def build_final_answer(question: str, tool_name: str, calculation: dict, references: list[dict]) -> str:
+    if calculation.get("status") == "latest_news":
+        return build_latest_news_answer(calculation)
+    if calculation.get("status") == "needs_latest_disclosure":
+        return build_rule_based_answer(tool_name, calculation, [])
+
     provider = normalize_provider(get_env("LLM_PROVIDER"))
     if provider == "openai":
         try:
@@ -28,9 +33,25 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
     return build_rule_based_answer(tool_name, calculation, references)
 
 
+def build_latest_news_answer(calculation: dict) -> str:
+    paragraphs = [calculation.get("summary") or "최신 뉴스 근거를 확인했습니다."]
+    documents = calculation.get("external_references") or []
+    if documents:
+        lines = ["확인된 뉴스 후보는 다음과 같습니다."]
+        for doc in documents[:5]:
+            source = f" ({doc.get('source_url')})" if doc.get("source_url") else ""
+            lines.append(f"- {doc.get('title', '뉴스')}: {doc.get('snippet', '')}{source}")
+        paragraphs.append("\n".join(lines))
+        paragraphs.append("위 내용은 뉴스 검색 결과의 제목과 요약을 근거로 한 것이므로, 확정 실적 수치는 원문 기사나 DART 잠정실적 공시와 함께 확인하는 것이 좋습니다.")
+    else:
+        paragraphs.append("뉴스 검색 결과에서 해당 분기 실적 수치를 확인할 만한 근거를 찾지 못했습니다. DART 잠정실적 공시나 회사 IR 자료를 확인해야 합니다.")
+    return "\n\n".join(paragraphs)
+
+
 def build_rule_based_answer(tool_name: str, calculation: dict, references: list[dict]) -> str:
     summary = calculation.get("summary") or calculation.get("message") or "질문을 해석했지만 충분한 계산 결과를 찾지 못했습니다."
     paragraphs = [summary]
+    needs_structure = _needs_structured_answer(calculation)
 
     steps = calculation.get("steps", [])
     if steps:
@@ -40,12 +61,19 @@ def build_rule_based_answer(tool_name: str, calculation: dict, references: list[
             if cleaned:
                 narrative_steps.append(cleaned)
         if narrative_steps:
-            paragraphs.extend(narrative_steps[:5])
+            if needs_structure:
+                paragraphs.extend(narrative_steps[:5])
+            else:
+                paragraphs.append(" ".join(narrative_steps[:3]))
 
-    if references:
+    if references and calculation.get("status") not in {"needs_latest_disclosure", "missing_data", "needs_company", "no_data"}:
         paragraphs.append("관련 재무 기준과 내부 지식 문서도 함께 확인해 답변했습니다.")
 
     return "\n\n".join(paragraphs)
+
+
+def _needs_structured_answer(calculation: dict) -> bool:
+    return bool(calculation.get("metrics") or calculation.get("series") or calculation.get("comparison"))
 
 
 def _clean_step(step: str) -> str:
@@ -109,17 +137,20 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
         "너는 한국 상장기업을 분석하는 재무 애널리스트 AI다.\n"
         "아래 JSON에는 사용자의 질문, 계산 도구 결과, 재무제표 추이, DART/뉴스 RAG 근거가 들어 있다.\n\n"
         "답변 원칙:\n"
-        "1. 숫자 변화와 원인 후보를 분리해서 설명한다.\n"
+        "1. 사용자가 단순 사실 확인이나 특정 수치를 물으면 자연스러운 문단형 답변으로 짧게 답한다.\n"
         "2. 근거 문서에 없는 산업명, 제품명, 업황 원인은 새로 만들어내지 않는다.\n"
         "3. 근거 문서가 부족하면 '추가 근거 필요'라고 말하고, 재무제표 패턴에서 가능한 확인 방향만 제시한다.\n"
-        "4. RAG 근거가 있으면 어떤 문단/출처와 연결되는지 짧게 언급한다.\n"
+        "4. RAG 근거가 있으면 어떤 출처와 연결되는지 짧게 언급한다.\n"
         "5. 투자 추천, 목표주가, 매수/매도 의견은 내지 않는다.\n"
         "6. 답변은 한국어로, 실무 보고서처럼 간결하게 작성한다.\n\n"
-        "권장 형식:\n"
-        "- 핵심 요약\n"
-        "- 숫자 추이\n"
-        "- 원인 후보\n"
-        "- 확인해야 할 추가 근거\n\n"
+        "형식 원칙:\n"
+        "- 기본은 소제목 없이 1~3개 자연스러운 문단으로 답한다.\n"
+        "- 사용자가 비교, 추이, 원인 분석, 여러 지표 분석을 요청한 경우에만 필요한 소제목을 사용한다.\n"
+        "- 소제목을 쓰더라도 Markdown 표시는 최소화하고, 불필요한 장식은 피한다.\n\n"
+        "수식 표기:\n"
+        "- 수식이 필요하면 일반 텍스트로 깨지게 쓰지 말고 LaTeX 형식으로 작성한다.\n"
+        "- 짧은 수식은 `$P_0 = \\frac{D_1}{k-g}$`처럼 `$...$` 안에 넣는다.\n"
+        "- 긴 수식은 `$$...$$` 블록으로 작성한다.\n\n"
         f"JSON:\n{json.dumps(payload, ensure_ascii=False, default=str)}"
     )
 

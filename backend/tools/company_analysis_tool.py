@@ -4,6 +4,8 @@ import re
 from typing import Any
 
 from company_data.financial_store import FinancialStatementStore
+from news_client import NewsClient, get_env as get_news_env
+from rag.external_rag import search_external_docs
 
 
 MAJOR_ACCOUNT_ORDER = [
@@ -74,6 +76,15 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
     if ratio_lines:
         steps.append("간단 분석: " + " | ".join(ratio_lines))
 
+    news_fetch_result = _try_fetch_company_news(company, question)
+    external_references = []
+    if news_fetch_result and news_fetch_result.get("status") == "ok":
+        external_references = _news_documents_only(search_external_docs(_news_query(company["company_name"], question), company["company_name"], limit=10))[:5]
+        if external_references:
+            steps.append("뉴스 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in external_references[:3]))
+    elif news_fetch_result:
+        steps.append(f"뉴스 수집: {news_fetch_result.get('message', '뉴스 수집에 실패했습니다.')}")
+
     summary = f"{company['company_name']}의 {year}년 주요 재무계정을 조회했습니다."
     if ratio_lines:
         summary += " 매출성장률, 수익성, 안정성, 현금흐름 지표까지 함께 계산했습니다."
@@ -86,6 +97,8 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
         "year": year,
         "accounts": accounts,
         "ratios": ratios,
+        "external_references": external_references,
+        "news_fetch": news_fetch_result,
     }
 
 
@@ -128,3 +141,32 @@ def _format_amount(amount: float) -> str:
 
 def _format_ratio(value: float) -> str:
     return f"{value * 100:.2f}%"
+
+
+def _try_fetch_company_news(company: dict[str, Any], question: str) -> dict[str, Any] | None:
+    if not (get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET")):
+        return {
+            "status": "missing_config",
+            "message": "뉴스 근거 수집에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+        }
+    query = _news_query(company.get("company_name"), question)
+    try:
+        result = NewsClient().save_news_for_rag(query, company_name=company.get("company_name"), display=10)
+        result["query"] = query
+        return result
+    except Exception:
+        return {
+            "status": "error",
+            "message": "뉴스 API 호출에 실패했습니다. 배포 환경의 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 설정과 외부 네트워크 연결을 확인해야 합니다.",
+            "query": query,
+        }
+
+
+def _news_query(company_name: str | None, question: str) -> str:
+    if company_name and company_name in question:
+        return question.strip()
+    return f"{company_name or ''} {question}".strip()
+
+
+def _news_documents_only(documents: list[dict]) -> list[dict]:
+    return [doc for doc in documents if str(doc.get("title", "")).startswith("news_")]
