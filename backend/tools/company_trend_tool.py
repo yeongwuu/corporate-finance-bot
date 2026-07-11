@@ -161,7 +161,10 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
         news_fetch_result = _try_fetch_news(company, question)
         if news_fetch_result.get("status") == "ok":
-            documents = _news_documents_only(search_external_docs(news_fetch_result.get("query", question), company.company_name, limit=10))[:5]
+            documents = _filter_industry_documents(
+                _news_documents_only(search_external_docs(news_fetch_result.get("query", question), company.company_name, limit=10)),
+                company,
+            )[:5]
     else:
         news_fetch_result = {
             "status": "missing_config",
@@ -170,17 +173,18 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
 
     dart_fetch_result = None
     if not documents and not news_requested:
-        documents = search_external_docs(question, company.company_name, limit=5)
+        documents = _filter_industry_documents(search_external_docs(question, company.company_name, limit=8), company)[:5]
     if not documents and not news_requested and load_dart_api_key():
         dart_fetch_result = _try_fetch_dart_report(company, period.end_year)
         if dart_fetch_result.get("status") == "ok":
-            documents = search_external_docs(question, company.company_name, limit=5)
+            documents = _filter_industry_documents(search_external_docs(question, company.company_name, limit=8), company)[:5]
 
     insight_lines = [] if ratio_series else _build_insights(metrics, documents)
-    evidence_lines = [] if ratio_series else _build_evidence_based_explanation(metrics, documents)
+    evidence_lines = [] if ratio_series else _build_evidence_based_explanation(metrics, documents, company)
 
     steps = [
         f"조회 대상: {company.company_name}({company.stock_code}), {period.start_year}~{period.end_year}년",
+        f"업종 맥락: {company.industry_name or '-'}",
         f"기간 해석: {period.source}",
         _format_ratio_series_table(ratio_series) if ratio_series else _format_series_table(series, account_keys),
     ]
@@ -211,6 +215,7 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         "summary": summary,
         "steps": steps,
         "company": company.__dict__,
+        "industry_context": _industry_context(company),
         "period": period.__dict__,
         "accounts": account_keys,
         "series": series,
@@ -365,6 +370,63 @@ def _extract_requested_year(question: str) -> int | None:
 
 def _news_documents_only(documents: list[dict]) -> list[dict]:
     return [doc for doc in documents if str(doc.get("title", "")).startswith("news_")]
+
+
+def _filter_industry_documents(documents: list[dict], company: Any) -> list[dict]:
+    context = _industry_context(company)
+    if not context:
+        return documents
+
+    filtered = []
+    for doc in documents:
+        text = f"{doc.get('title', '')} {doc.get('snippet', '')}".lower()
+        allowed_hits = sum(1 for keyword in context["allowed"] if keyword in text)
+        blocked_hits = sum(1 for keyword in context["blocked"] if keyword in text)
+        if blocked_hits and not allowed_hits:
+            continue
+        filtered.append(doc)
+    return filtered
+
+
+def _industry_context(company: Any) -> dict[str, list[str]] | None:
+    industry = str(getattr(company, "industry_name", "") or "").lower()
+    company_name = str(getattr(company, "company_name", "") or "").lower()
+    if any(token in industry for token in ["의약", "바이오", "생물학", "제약"]):
+        return {
+            "allowed": [
+                company_name,
+                "바이오",
+                "바이오시밀러",
+                "시밀러",
+                "의약",
+                "제약",
+                "신약",
+                "치료제",
+                "항체",
+                "램시마",
+                "유플라이마",
+                "짐펜트라",
+                "임상",
+                "fda",
+                "ema",
+                "허가",
+                "헬스케어",
+            ],
+            "blocked": [
+                "반도체",
+                "메모리",
+                "hbm",
+                "gpu",
+                "데이터센터",
+                "서버",
+                "파운드리",
+                "스마트폰",
+                "모바일",
+                "디스플레이",
+                "자동차",
+            ],
+        }
+    return None
 
 
 def _resolve_comparison_companies(store: FinancialStatementStore, question: str) -> list[Any]:
@@ -757,7 +819,7 @@ def _build_insights(metrics: list[dict[str, Any]], documents: list[dict]) -> lis
     return lines
 
 
-def _build_evidence_based_explanation(metrics: list[dict[str, Any]], documents: list[dict]) -> list[str]:
+def _build_evidence_based_explanation(metrics: list[dict[str, Any]], documents: list[dict], company: Any | None = None) -> list[str]:
     if not documents:
         return []
 
@@ -765,7 +827,7 @@ def _build_evidence_based_explanation(metrics: list[dict[str, Any]], documents: 
     revenue = _find_metric(metrics, "revenue")
     operating_income = _find_metric(metrics, "operating_income")
     evidence_text = " ".join(doc.get("snippet", "") for doc in documents).lower()
-    evidence_topics = _extract_evidence_topics(evidence_text)
+    evidence_topics = _extract_evidence_topics(evidence_text, company)
 
     if revenue:
         direction = "증가" if revenue["change"] > 0 else "감소" if revenue["change"] < 0 else "정체"
@@ -791,7 +853,22 @@ def _build_evidence_based_explanation(metrics: list[dict[str, Any]], documents: 
     return lines
 
 
-def _extract_evidence_topics(text: str) -> list[str]:
+def _extract_evidence_topics(text: str, company: Any | None = None) -> list[str]:
+    context = _industry_context(company) if company else None
+    if context:
+        topic_keywords = [
+            ("바이오시밀러/의약품", ["바이오시밀러", "시밀러", "의약", "제약", "치료제", "항체"]),
+            ("신약/파이프라인", ["신약", "파이프라인", "임상", "허가", "fda", "ema"]),
+            ("헬스케어 시장", ["헬스케어", "시장", "수요", "고객"]),
+            ("가격/판가", ["가격", "판가", "약가"]),
+            ("원가/비용", ["원가", "비용", "수익성"]),
+        ]
+        topics = []
+        for label, keywords in topic_keywords:
+            if any(keyword in text for keyword in keywords):
+                topics.append(label)
+        return topics
+
     topic_keywords = [
         ("메모리 반도체", ["메모리", "dram", "nand"]),
         ("반도체 업황", ["반도체", "파운드리", "시스템lsi"]),

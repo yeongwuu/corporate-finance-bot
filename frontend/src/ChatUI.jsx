@@ -317,6 +317,7 @@ function MessageText({ message, onAskSuggestion }) {
   const [visibleText, setVisibleText] = useState(message.meta?.animate ? "" : message.content);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [feedbackBurst, setFeedbackBurst] = useState(null);
   const [isFolded, setIsFolded] = useState(false);
   const isInitialAssistantMessage = message.role === "assistant" && message.meta?.tool === "ready";
 
@@ -354,6 +355,11 @@ function MessageText({ message, onAskSuggestion }) {
     }
   }
 
+  function toggleFeedback(value) {
+    setFeedback(feedback === value ? null : value);
+    setFeedbackBurst({ value, id: Date.now() });
+  }
+
   return (
     <>
       {isFolded ? (
@@ -380,21 +386,27 @@ function MessageText({ message, onAskSuggestion }) {
           </button>
           <button
             type="button"
-            className={feedback === "up" ? "active" : undefined}
-            onClick={() => setFeedback(feedback === "up" ? null : "up")}
+            className={`feedback-button${feedback === "up" ? " active" : ""}`}
+            onClick={() => toggleFeedback("up")}
             aria-label="좋아요"
             title="좋아요"
           >
             👍
+            {feedbackBurst?.value === "up" ? (
+              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">👍</span>
+            ) : null}
           </button>
           <button
             type="button"
-            className={feedback === "down" ? "active" : undefined}
-            onClick={() => setFeedback(feedback === "down" ? null : "down")}
+            className={`feedback-button${feedback === "down" ? " active" : ""}`}
+            onClick={() => toggleFeedback("down")}
             aria-label="비추천"
             title="비추천"
           >
             👎
+            {feedbackBurst?.value === "down" ? (
+              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">👎</span>
+            ) : null}
           </button>
         </div>
       ) : null}
@@ -722,11 +734,17 @@ function LineChart({ chart }) {
   const maxY = rawMaxY + paddingY;
   const yRange = maxY - minY || 1;
   const xRange = maxX - minX || 1;
-  const yTicks = [0, 0.5, 1].map((ratio) => minY + yRange * ratio);
+  const axisBreak = buildAxisBreak(yValues, minY, maxY, padding, height);
+  const yTicks = axisBreak
+    ? [minY, axisBreak.lowerEnd, axisBreak.upperStart, maxY]
+    : [0, 0.5, 1].map((ratio) => minY + yRange * ratio);
   const xTicks = buildXTicks(allPoints);
 
   const scaleX = (value) => padding.left + ((value - minX) / xRange) * (width - padding.left - padding.right);
-  const scaleY = (value) => height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
+  const scaleY = (value) => {
+    if (axisBreak) return scaleBrokenY(value, axisBreak);
+    return height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
+  };
 
   return (
     <div className="line-chart">
@@ -737,6 +755,13 @@ function LineChart({ chart }) {
             <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">{formatChartValue(tick, chart.unit)}</text>
           </g>
         ))}
+        {axisBreak ? (
+          <g className="axis-break" aria-label="중간 축 생략">
+            <path d={`M ${padding.left - 9} ${axisBreak.gapMiddle - 4} q 4 -5 8 0 t 8 0`} />
+            <path d={`M ${padding.left + 8} ${axisBreak.gapMiddle - 4} q 4 -5 8 0 t 8 0`} />
+            <text x={padding.left - 36} y={axisBreak.gapMiddle + 4} textAnchor="middle">~</text>
+          </g>
+        ) : null}
         <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} />
         <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} />
         {chart.datasets.map((dataset, index) => {
@@ -774,6 +799,63 @@ function LineChart({ chart }) {
       </div>
     </div>
   );
+}
+
+function buildAxisBreak(values, minY, maxY, padding, height) {
+  if (minY < 0 || maxY <= 0) return null;
+  const positives = [...new Set(values.filter((value) => value > 0).sort((a, b) => a - b))];
+  if (positives.length < 3) return null;
+
+  let breakPair = null;
+  for (let index = 0; index < positives.length - 1; index += 1) {
+    const low = positives[index];
+    const high = positives[index + 1];
+    const ratio = high / Math.max(low, 1);
+    const gapShare = (high - low) / Math.max(maxY - minY, 1);
+    if (ratio >= 4 && gapShare >= 0.35 && (!breakPair || ratio > breakPair.ratio)) {
+      breakPair = { low, high, ratio };
+    }
+  }
+  if (!breakPair) return null;
+
+  const plotTop = padding.top;
+  const plotBottom = height - padding.bottom;
+  const plotHeight = plotBottom - plotTop;
+  const gapSize = 18;
+  const lowerHeight = plotHeight * 0.44;
+  const upperHeight = plotHeight - lowerHeight - gapSize;
+  const upperTop = plotTop;
+  const upperBottom = upperTop + upperHeight;
+  const gapTop = upperBottom;
+  const gapBottom = gapTop + gapSize;
+  const lowerTop = gapBottom;
+  const lowerBottom = plotBottom;
+
+  return {
+    minY,
+    maxY,
+    lowerEnd: breakPair.low,
+    upperStart: breakPair.high,
+    upperTop,
+    upperBottom,
+    lowerTop,
+    lowerBottom,
+    upperHeight,
+    lowerHeight,
+    gapMiddle: gapTop + gapSize / 2,
+  };
+}
+
+function scaleBrokenY(value, axisBreak) {
+  if (value <= axisBreak.lowerEnd) {
+    const range = axisBreak.lowerEnd - axisBreak.minY || 1;
+    return axisBreak.lowerBottom - ((value - axisBreak.minY) / range) * axisBreak.lowerHeight;
+  }
+  if (value >= axisBreak.upperStart) {
+    const range = axisBreak.maxY - axisBreak.upperStart || 1;
+    return axisBreak.upperBottom - ((value - axisBreak.upperStart) / range) * axisBreak.upperHeight;
+  }
+  return axisBreak.gapMiddle;
 }
 
 function buildXTicks(points) {

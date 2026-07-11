@@ -81,12 +81,17 @@ def _group_industry_companies(store: FinancialStatementStore, question: str) -> 
         return {
             "status": "ok",
             "mode": "industry_group",
-            "summary": f"{company.company_name}의 업종은 '{company.industry_name}'입니다.",
+            "summary": (
+                f"{company.company_name}의 세부 업종은 '{company.industry_name}'이고, "
+                f"대분류 산업군은 '{_major_industry(company.industry_name or company.company_name)}'입니다."
+            ),
             "company": company.__dict__,
             "industry": company.industry_name,
+            "major_industry": _major_industry(company.industry_name or company.company_name),
             "groups": [
                 {
                     "industry_name": company.industry_name,
+                    "major_industry": _major_industry(company.industry_name or company.company_name),
                     "count": len(rows),
                     "companies": rows,
                 }
@@ -179,6 +184,7 @@ def _query_keyword_industry_groups(store: FinancialStatementStore, industry: str
             industry_name,
             {
                 "industry_name": industry_name,
+                "major_industry": _major_industry(industry_name),
                 "count": int(row["industry_count"]),
                 "companies": [],
             },
@@ -255,11 +261,13 @@ def _query_ranked_companies(store: FinancialStatementStore, industry: str, limit
 
 
 def _company_row(row: sqlite3.Row) -> dict[str, Any]:
+    industry_name = row["industry_name"]
     return {
         "stock_code": row["stock_code"],
         "company_name": row["company_name"],
         "market": row["market"],
-        "industry_name": row["industry_name"],
+        "industry_name": industry_name,
+        "major_industry": _major_industry(industry_name),
         "latest_year": int(row["latest_year"]),
     }
 
@@ -307,3 +315,27 @@ def _keywords_for_industry(industry: str) -> list[str]:
     if industry == "방산":
         return ["방산", "방위", "국방", "항공", "우주", "무기", "탄약", "군수"]
     return [industry]
+
+
+def _major_industry(industry_name: str) -> str:
+    text = industry_name.lower()
+    rules = [
+        ("바이오/제약", ["바이오", "제약", "의약", "생물학", "의료용 물질", "기초 의약", "신약", "헬스케어"]),
+        ("의료기기/헬스케어", ["의료용 기기", "의료기기", "진단", "치과", "정형외과"]),
+        ("반도체/전자부품", ["반도체", "전자부품", "전자집적회로", "다이오드", "트랜지스터"]),
+        ("디스플레이/통신장비", ["디스플레이", "통신", "방송장비", "영상", "음향"]),
+        ("소프트웨어/IT서비스", ["소프트웨어", "정보서비스", "컴퓨터 프로그래밍", "시스템 통합", "데이터베이스"]),
+        ("방산/항공우주", ["항공기", "우주선", "방위", "탄약", "무기", "군수"]),
+        ("자동차/모빌리티", ["자동차", "차체", "트레일러", "운송장비", "자동차 부품"]),
+        ("화학/소재", ["화학", "플라스틱", "고무", "섬유", "금속", "비금속", "유리", "시멘트"]),
+        ("기계/장비", ["기계", "장비", "공작", "펌프", "압축기", "산업용"]),
+        ("에너지/전기장비", ["전기", "전지", "배터리", "발전", "에너지", "전동기"]),
+        ("건설/부동산", ["건설", "토목", "건축", "부동산"]),
+        ("금융", ["금융", "보험", "투자", "신탁"]),
+        ("유통/소비재", ["도매", "소매", "유통", "음식료", "식료품", "의복", "화장품"]),
+        ("미디어/엔터", ["영화", "방송", "음악", "게임", "출판", "광고", "콘텐츠"]),
+    ]
+    for label, keywords in rules:
+        if any(keyword in text for keyword in keywords):
+            return label
+    return "기타 제조/서비스"

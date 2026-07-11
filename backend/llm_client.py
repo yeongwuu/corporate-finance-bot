@@ -215,10 +215,13 @@ def build_industry_group_answer(calculation: dict) -> str:
     for group in groups[:8]:
         companies = group.get("companies") or []
         names = ", ".join(f"{item['company_name']}({item['stock_code']})" for item in companies[:8])
-        lines.append(f"- {group.get('industry_name') or '-'}: {group.get('count', len(companies))}개 기업")
+        major = group.get("major_industry")
+        industry = group.get("industry_name") or "-"
+        label = f"{major} / {industry}" if major else industry
+        lines.append(f"- {label}: {group.get('count', len(companies))}개 기업")
         if names:
             lines.append(f"  예시: {names}")
-    lines.append("업종 그룹은 재무제표 데이터의 표준 업종명 기준이며, 사용자가 말한 산업군과 완전히 일치하지 않을 수 있습니다.")
+    lines.append("대분류 산업군은 재무제표의 세부 업종명을 규칙 기반으로 묶은 값입니다.")
     return "\n".join(lines)
 
 
@@ -336,7 +339,12 @@ def build_rule_based_answer(tool_name: str, calculation: dict, references: list[
                 paragraphs.append(" ".join(narrative_steps[:3]))
 
     if references and calculation.get("status") not in {"needs_latest_disclosure", "missing_data", "needs_company", "no_data"}:
-        paragraphs.append("재무제표와 관련 뉴스에서 확인되는 범위 안에서 해석했습니다.")
+        has_news = any(str(reference.get("title", "")).startswith("news_") for reference in references)
+        paragraphs.append(
+            "재무제표와 관련 뉴스에서 확인되는 범위 안에서 해석했습니다."
+            if has_news
+            else "재무제표와 확보된 근거 자료 범위 안에서 해석했습니다."
+        )
 
     return "\n\n".join(paragraphs)
 
@@ -416,6 +424,9 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
         "6. calculation.stats가 있으면 주가 백테스팅 결과로 보고, 기간 수익률, 평균, 표준편차, 변동성, 최대낙폭을 간결히 요약한다.\n"
         "7. 투자 추천, 목표주가, 매수/매도 의견은 내지 않는다.\n"
         "8. 답변은 한국어로, 실무 보고서처럼 간결하게 작성한다.\n\n"
+        "9. calculation.company.industry_name과 맞지 않는 산업 이슈를 전망 근거로 쓰지 않는다. "
+        "예를 들어 바이오/의약품 기업에는 반도체, GPU, 데이터센터, 모바일, 디스플레이 업황을 언급하지 않는다. "
+        "업종과 맞는 근거가 없으면 재무 추이 중심으로만 설명하고 근거 부족을 명확히 말한다.\n\n"
         "금지 표현:\n"
         "- RAG, backend, frontend, API, tool, calculation, 내부 지식 문서, 추가 근거, 확인 문서 같은 구현 용어를 답변에 쓰지 않는다.\n"
         "- 불필요한 Markdown 볼드체, 장식 이모티콘, 체크리스트형 '확인해야 할 추가 근거' 섹션을 만들지 않는다.\n\n"
