@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: corporate-finance-bot-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: BACKEND_CORS_ORIGIN_REGEX
+        value: https://.*\.onrender\.com
+      - key: LLM_PROVIDER
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: DART_API_KEY
+        sync: false
+      - key: NEWS_PROVIDER
+        sync: false
+      - key: NAVER_CLIENT_ID
+        sync: false
+      - key: NAVER_CLIENT_SECRET
+        sync: false
+
+  - type: web
+    name: corporate-finance-bot-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_HOSTNAME
+        fromService:
+          type: web
+          name: corporate-finance-bot-api
+          envVarKey: RENDER_EXTERNAL_HOSTNAME

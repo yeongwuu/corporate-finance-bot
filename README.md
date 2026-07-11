@@ -3,6 +3,8 @@
 재무관리 질문을 처리하기 위한 RAG + LLM + Python 계산 Tool 기반 챗봇입니다.
 재무관리 이론 질의, 계산형 문제, KOSDAQ 재무제표 기반 기업 분석, DART/뉴스 원문 기반 추이 분석을 지원합니다.
 
+구현 순서와 백엔드/프론트엔드/미들웨어 구성 요약은 `DEVELOPMENT_SUMMARY.md`에 정리되어 있습니다.
+
 ## Structure
 
 ```text
@@ -110,6 +112,25 @@ npm run dev
 ```
 
 기본 프론트엔드 주소는 `http://127.0.0.1:5173`이고, 백엔드는 `http://127.0.0.1:8000`에서 실행합니다.
+
+## Deploy
+
+Notion 포트폴리오에서 면접관이 접속할 수 있게 하려면 공개 URL이 필요합니다. 이 저장소는 Render Blueprint(`render.yaml`)로 백엔드 API와 정적 프론트엔드를 함께 배포할 수 있게 구성되어 있습니다.
+
+1. 이 저장소를 GitHub에 push합니다.
+2. Render에서 New Blueprint를 선택하고 이 저장소를 연결합니다.
+3. `corporate-finance-bot-api`와 `corporate-finance-bot-web` 두 서비스가 생성되는지 확인합니다.
+4. 필요한 경우 API 서비스의 환경변수에 LLM/DART/뉴스 키를 입력합니다.
+5. 배포가 끝나면 `corporate-finance-bot-web`의 `onrender.com` URL을 Notion에 연결합니다.
+
+배포 구성은 다음 방식으로 동작합니다.
+
+- API: `cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT`
+- Web: `frontend`에서 `npm ci && npm run build` 후 `dist`를 정적 사이트로 배포
+- Web은 `VITE_API_HOSTNAME`으로 API 서비스의 Render 호스트명을 받아 `https://...` API를 호출합니다.
+- API는 `BACKEND_CORS_ORIGIN_REGEX=https://.*\.onrender\.com` 설정으로 Render 정적 사이트의 요청을 허용합니다.
+
+포트폴리오 공개용으로는 Render 무료 인스턴스를 사용할 수 있지만, 무료 인스턴스는 비활성 상태 후 첫 요청이 느릴 수 있습니다. 면접 직전에는 배포 URL을 한 번 열어 API가 깨어 있는지 확인하는 편이 좋습니다.
 
 ## Design
 

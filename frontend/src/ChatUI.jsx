@@ -1,6 +1,9 @@
 import React, { useMemo, useRef, useState } from "react";
 
-const API_URL = import.meta.env?.VITE_API_URL || "http://localhost:8000";
+const API_HOSTNAME = import.meta.env?.VITE_API_HOSTNAME;
+const API_URL =
+  import.meta.env?.VITE_API_URL ||
+  (API_HOSTNAME ? `https://${API_HOSTNAME}` : "http://localhost:8000");
 
 const SAMPLE_PROMPTS = [
   "WACC와 APV 차이를 설명해줘",

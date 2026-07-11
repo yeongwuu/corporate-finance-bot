@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,23 @@ app = FastAPI(title="Corporate Finance Bot API")
 
 logger = logging.getLogger("corporate_finance_bot")
 logging.basicConfig(level=logging.INFO)
+
+
+def _cors_origins() -> list[str]:
+    raw_origins = os.getenv(
+        "BACKEND_CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173",
+    )
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+    raw_hostnames = os.getenv("BACKEND_CORS_HOSTNAMES", "")
+    for hostname in [host.strip() for host in raw_hostnames.split(",") if host.strip()]:
+        if hostname.startswith(("http://", "https://")):
+            origins.append(hostname)
+        else:
+            origins.append(f"https://{hostname}")
+
+    return origins
 
 
 @app.middleware("http")
@@ -71,12 +89,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_origins(),
+    allow_origin_regex=os.getenv("BACKEND_CORS_ORIGIN_REGEX") or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
