@@ -87,6 +87,7 @@ export default function ChatUI() {
           role: "assistant",
           content: data.answer || "답변을 생성하지 못했습니다.",
           meta: {
+            animate: true,
             tool: data.tool,
             status: data.calculation?.status,
             references: data.references?.length || 0,
@@ -106,6 +107,7 @@ export default function ChatUI() {
                 ? "백엔드 서버에 연결하지 못했습니다."
                 : error.message,
           meta: {
+            animate: true,
             tool: error.name === "AbortError" ? "cancelled" : "network",
             status: error.name === "AbortError" ? "cancelled" : "error",
           },
@@ -150,7 +152,7 @@ export default function ChatUI() {
               <div className="message-header">
                 <strong>{message.role === "user" ? "User" : "Assistant"}</strong>
               </div>
-              <p>{message.content}</p>
+              <MessageText message={message} />
             </article>
           ))}
 
@@ -239,6 +241,77 @@ export default function ChatUI() {
       </aside>
     </main>
   );
+}
+
+function MessageText({ message }) {
+  const [visibleText, setVisibleText] = useState(message.meta?.animate ? "" : message.content);
+
+  useEffect(() => {
+    if (!message.meta?.animate) {
+      setVisibleText(message.content);
+      return undefined;
+    }
+
+    setVisibleText("");
+    let index = 0;
+    const step = Math.max(2, Math.min(10, Math.floor(message.content.length / 180)));
+    const timerId = window.setInterval(() => {
+      index = Math.min(message.content.length, index + step);
+      setVisibleText(message.content.slice(0, index));
+      if (index >= message.content.length) {
+        window.clearInterval(timerId);
+      }
+    }, 16);
+
+    return () => window.clearInterval(timerId);
+  }, [message.content, message.meta?.animate]);
+
+  return <div className="message-body">{formatAnswerText(visibleText)}</div>;
+}
+
+function formatAnswerText(text) {
+  if (!text) return null;
+
+  return text.split(/\n{2,}/).map((block, blockIndex) => {
+    const lines = block.split("\n").filter(Boolean);
+    if (lines.length === 1) {
+      return renderAnswerLine(lines[0], `${blockIndex}-0`);
+    }
+    return (
+      <div className="answer-block" key={blockIndex}>
+        {lines.map((line, lineIndex) => renderAnswerLine(line, `${blockIndex}-${lineIndex}`))}
+      </div>
+    );
+  });
+}
+
+function renderAnswerLine(line, key) {
+  const heading = getHeadingMeta(line);
+  if (heading) {
+    return (
+      <p className="answer-heading" key={key}>
+        <span aria-hidden="true">{heading.icon}</span>
+        <strong>{line}</strong>
+      </p>
+    );
+  }
+  return <p key={key}>{line}</p>;
+}
+
+function getHeadingMeta(line) {
+  const trimmed = line.trim();
+  const headingRules = [
+    { tokens: ["핵심 요약", "요약"], icon: "✨" },
+    { tokens: ["비교 대상"], icon: "⚖️" },
+    { tokens: ["연도별 추이", "숫자 추이"], icon: "📈" },
+    { tokens: ["인사이트"], icon: "💡" },
+    { tokens: ["원인", "배경"], icon: "🔎" },
+    { tokens: ["뉴스", "근거"], icon: "📰" },
+    { tokens: ["확인", "추가"], icon: "✅" },
+    { tokens: ["계산 요약"], icon: "🧮" },
+    { tokens: ["기간:"], icon: "🏢" },
+  ];
+  return headingRules.find((rule) => rule.tokens.some((token) => trimmed.includes(token)));
 }
 
 function formatNewsStatus(calculation) {

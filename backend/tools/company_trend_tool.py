@@ -31,7 +31,11 @@ class Period:
 
 def analyze_company_trend(question: str) -> dict[str, Any]:
     store = FinancialStatementStore()
+    news_requested = _should_fetch_news(question)
     try:
+        comparison_companies = _resolve_comparison_companies(store, question) if news_requested else []
+        if len(comparison_companies) >= 2:
+            return _analyze_market_comparison(question, store, comparison_companies[:3])
         company = store.resolve_company(question)
     except FileNotFoundError as exc:
         return {
@@ -65,7 +69,6 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         }
 
     metrics = _build_metric_summary(series, account_keys)
-    news_requested = _should_fetch_news(question)
     documents = [] if news_requested else search_external_docs(question, company.company_name, limit=5)
     dart_fetch_result = None
     news_fetch_result = None
@@ -191,6 +194,94 @@ def _try_fetch_news(company: Any, question: str) -> dict[str, Any]:
             "status": "error",
             "message": "뉴스 API 호출에 실패했습니다. 배포 환경의 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 설정과 외부 네트워크 연결을 확인해야 합니다.",
         }
+
+
+def _resolve_comparison_companies(store: FinancialStatementStore, question: str) -> list[Any]:
+    candidates = []
+    aliases = [
+        "삼성전자",
+        "SK하이닉스",
+        "sk하이닉스",
+        "하이닉스",
+        "셀트리온",
+        "LG에너지솔루션",
+        "lg에너지솔루션",
+        "현대차",
+        "기아",
+    ]
+    lowered = question.lower()
+    for alias in aliases:
+        if alias.lower() not in lowered:
+            continue
+        query = "SK하이닉스" if alias.lower() == "하이닉스" else alias
+        company = store.resolve_company(query)
+        if company and company.stock_code and company.stock_code not in {item.stock_code for item in candidates}:
+            candidates.append(company)
+    return candidates
+
+
+def _analyze_market_comparison(question: str, store: FinancialStatementStore, companies: list[Any]) -> dict[str, Any]:
+    company_summaries = []
+    news_results = []
+    documents = []
+    for company in companies:
+        available_years = store.available_years(company.stock_code)
+        if not available_years:
+            continue
+        period = _extract_period(question, available_years)
+        account_keys = ["revenue", "operating_income", "net_income"]
+        series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
+        metrics = _build_metric_summary(series, account_keys)
+        company_summaries.append(
+            {
+                "company": company.__dict__,
+                "period": period.__dict__,
+                "series": series,
+                "metrics": metrics,
+            }
+        )
+        if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+            news_result = _try_fetch_news(company, question)
+            news_results.append({"company": company.company_name, **news_result})
+            if news_result.get("status") == "ok":
+                documents.extend(search_external_docs(question, company.company_name, limit=3))
+        else:
+            news_results.append(
+                {
+                    "company": company.company_name,
+                    "status": "missing_config",
+                    "message": "최근 주가/뉴스 비교에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+                }
+            )
+
+    steps = [
+        "비교 대상: " + ", ".join(f"{item['company']['company_name']}({item['company']['stock_code']})" for item in company_summaries),
+    ]
+    for item in company_summaries:
+        company = item["company"]
+        period = item["period"]
+        steps.append(f"{company['company_name']} 기간: {period['start_year']}~{period['end_year']}년")
+        steps.append(_format_series_table(item["series"], ["revenue", "operating_income", "net_income"]))
+        if item["metrics"]:
+            steps.append(f"{company['company_name']} 계산 요약: " + " | ".join(_format_metric(metric) for metric in item["metrics"]))
+    for result in news_results:
+        if result.get("status") != "ok":
+            steps.append(f"{result['company']} 뉴스 수집: {result.get('message', '뉴스 수집에 실패했습니다.')}")
+    if documents:
+        steps.append("RAG 근거 후보: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:5]))
+
+    return {
+        "status": "ok",
+        "summary": "두 기업 중 어느 주가가 더 오를지 단정하지 않고, 최신 뉴스와 재무 추이를 나눠 비교해야 합니다.",
+        "steps": steps,
+        "comparison": company_summaries,
+        "external_references": documents,
+        "news_fetch": {
+            "status": "ok" if any(result.get("status") == "ok" for result in news_results) else "missing_config",
+            "count": sum(result.get("count", 0) for result in news_results),
+            "results": news_results,
+        },
+    }
 
 
 def _clip_period(start_year: int, end_year: int, available_years: list[int], source: str) -> Period:

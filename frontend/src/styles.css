@@ -70,8 +70,9 @@ button {
 .eyebrow {
   margin: 0;
   color: var(--accent);
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 700;
+  line-height: 1.15;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -205,11 +206,40 @@ h2 {
   }
 }
 
-.message p {
+.message-body {
+  display: grid;
+  gap: 12px;
+}
+
+.message p,
+.message-body p {
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.62;
   font-size: 15px;
+}
+
+.answer-block {
+  display: grid;
+  gap: 6px;
+}
+
+.message-body .answer-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  color: var(--accent-dark);
+  line-height: 1.35;
+  font-size: 17px;
+}
+
+.message-body .answer-heading strong {
+  font-weight: 800;
+}
+
+.message.user .message-body .answer-heading {
+  color: #ffffff;
 }
 
 .composer {
