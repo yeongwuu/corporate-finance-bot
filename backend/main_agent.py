@@ -1,4 +1,5 @@
 import time
+from typing import Callable
 
 from chart_builder import build_chart_spec
 from llm_client import build_attachment_answer, build_final_answer
@@ -20,7 +21,12 @@ from tools.valuation_tool import analyze_valuation
 from tools.working_capital_tool import analyze_working_capital
 
 
-def answer_finance_question(question: str, history: list[dict] | None = None, attachment: dict | None = None) -> dict:
+def answer_finance_question(
+    question: str,
+    history: list[dict] | None = None,
+    attachment: dict | None = None,
+    on_step: Callable[[int], None] | None = None,
+) -> dict:
     started_at = time.perf_counter()
     trace = []
     if attachment:
@@ -31,19 +37,31 @@ def answer_finance_question(question: str, history: list[dict] | None = None, at
         trace.append(_trace_item("이전 질문 맥락 확인", "후속 질문 해석에 사용할 최근 사용자 질문을 반영했습니다.", started_at))
     effective_question = _with_context(question, context_text)
 
+    if on_step:
+        on_step(0)
+
     step_started = time.perf_counter()
     tool_name = select_tool(effective_question)
     trace.append(_trace_item("분석 도구 선택", _tool_description(tool_name), step_started))
 
+    if on_step:
+        on_step(1)
+
     step_started = time.perf_counter()
     knowledge_references = search_knowledge(effective_question)
     trace.append(_trace_item("재무 지식 검색", f"관련 기준 문서 {len(knowledge_references)}건을 확인했습니다.", step_started))
+
+    if on_step:
+        on_step(2)
 
     step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)
     trace.append(_trace_item("데이터 분석 실행", _calculation_description(calculation), step_started))
     if context_text and isinstance(calculation, dict):
         calculation["conversation_context"] = context_text
+
+    if on_step:
+        on_step(3)
 
     step_started = time.perf_counter()
     references = _combined_references(calculation, knowledge_references)

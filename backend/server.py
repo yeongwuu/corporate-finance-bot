@@ -123,9 +123,44 @@ def health_check() -> dict:
     return {"status": "ok"}
 
 
+import queue
+import threading
+import json
+from fastapi.responses import StreamingResponse
+
+
 @app.post("/api/chat")
-def chat(request: ChatRequest) -> dict:
-    return answer_finance_question(request.question, history=request.history, attachment=request.attachment)
+def chat(request: ChatRequest) -> StreamingResponse:
+    q = queue.Queue()
+
+    def run_agent():
+        try:
+            def on_step(step_index: int):
+                q.put(f"event: step\ndata: {json.dumps({'step_index': step_index})}\n\n")
+
+            res = answer_finance_question(
+                question=request.question,
+                history=request.history,
+                attachment=request.attachment,
+                on_step=on_step
+            )
+            q.put(f"event: result\ndata: {json.dumps(res, ensure_ascii=False)}\n\n")
+        except Exception as e:
+            logger.exception("Agent execution failed")
+            q.put(f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n")
+        finally:
+            q.put(None)
+
+    threading.Thread(target=run_agent, daemon=True).start()
+
+    def generator():
+        while True:
+            item = q.get()
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
 @app.post("/api/feedback-email")

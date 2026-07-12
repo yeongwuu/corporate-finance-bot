@@ -23,6 +23,7 @@ export default function ChatUI() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStartedAt, setLoadingStartedAt] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [activeStep, setActiveStep] = useState(0);
   const [pendingFeedback, setPendingFeedback] = useState(null);
   const [feedbackNotice, setFeedbackNotice] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
@@ -81,6 +82,7 @@ export default function ChatUI() {
       fileInputRef.current.value = "";
     }
     setLoadingStartedAt(Date.now());
+    setActiveStep(0);
     setIsLoading(true);
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -93,10 +95,51 @@ export default function ChatUI() {
         signal: abortController.signal,
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.message || "Request failed");
+        throw new Error("Request failed");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let data = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = null;
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.startsWith("event:")) {
+            currentEvent = trimmed.replace("event:", "").trim();
+          } else if (trimmed.startsWith("data:")) {
+            const rawData = trimmed.replace("data:", "").trim();
+            try {
+              const parsed = JSON.parse(rawData);
+              if (currentEvent === "step") {
+                setActiveStep(parsed.step_index);
+              } else if (currentEvent === "result") {
+                data = parsed;
+              } else if (currentEvent === "error") {
+                throw new Error(parsed.message || "Execution error");
+              }
+            } catch (err) {
+              console.error("Failed to parse event stream chunk", err);
+            }
+          }
+        }
+      }
+
+      if (!data) {
+        throw new Error("답변 데이터를 수신하지 못했습니다.");
       }
 
       const answer = data.answer || "답변을 생성하지 못했습니다.";
@@ -227,7 +270,7 @@ export default function ChatUI() {
                 </span>
               </div>
               <p>질문을 분석하고 필요한 데이터를 조회하는 중입니다.</p>
-              <LoadingTrace elapsedSeconds={elapsedSeconds} />
+              <LoadingTrace activeStep={activeStep} />
             </article>
           ) : null}
         </div>
@@ -471,18 +514,17 @@ function SourcePanel({ references }) {
   );
 }
 
-function LoadingTrace({ elapsedSeconds }) {
+function LoadingTrace({ activeStep }) {
   const steps = [
     "질문 의도와 맥락을 해석하고 있습니다.",
     "필요한 재무제표, 뉴스, 공시 또는 주가 데이터를 고르고 있습니다.",
     "계산 툴에서 지표와 비교 대상을 처리하고 있습니다.",
     "답변에 필요한 그래프와 핵심 문장을 정리하고 있습니다.",
   ];
-  const activeIndex = Math.min(steps.length - 1, Math.floor(elapsedSeconds / 2));
   return (
     <div className="loading-trace" aria-label="실시간 처리 과정">
       {steps.map((step, index) => (
-        <div key={step} className={index <= activeIndex ? "active" : undefined}>
+        <div key={step} className={index <= activeStep ? "active" : undefined}>
           <span>{index + 1}</span>
           <p>{step}</p>
         </div>
@@ -642,9 +684,8 @@ function buildAlternativeQuestions(question) {
     const first = companyNames[0];
     const second = companyNames[1];
     return [
-      `${first}의 ${contextKeyword}은 얼마입니까?`,
-      `${second}의 ${contextKeyword}은 얼마입니까?`,
-      `${first}와 ${second}의 ${contextKeyword}을 비교해줘`,
+      `${first}와 ${second}의 최근 ${contextKeyword} 비교 추이를 분석해줘`,
+      `${first}의 최근 ${contextKeyword}과 매출액을 함께 비교해줘`,
     ];
   }
 
@@ -652,29 +693,26 @@ function buildAlternativeQuestions(question) {
     const company = companyNames[0];
     if (metric === "PBR") {
       return [
-        "PBR을 구하는 공식은 무엇입니까?",
-        `${company}의 최근 주가 흐름을 보여줘`,
-        `${company}의 자본총계와 발행주식수를 확인해줘`,
+        `PBR을 구하는 공식과 해석 방법을 알려줘`,
+        `${company}의 PBR 계산에 필요한 주가와 BPS를 확인해줘`,
       ];
     }
-    if (contextKeyword !== metric) {
+    const isPriceRelated = ["주가", "종가", "가격"].some(term => question.includes(term));
+    if (isPriceRelated) {
       return [
-        `${company}의 ${contextKeyword}은 얼마입니까?`,
-        `${company}의 ${metric}과 ${contextKeyword}을 함께 분석해줘`,
-        `${company}의 최근 ${contextKeyword} 추이를 그래프로 보여줘`,
+        `${company}의 최근 주가 변동성 및 최대낙폭(MDD)을 계산해줘`,
+        `${company}의 최근 5년 주가를 가지고 다음 주가를 예측해줘`,
       ];
     }
     return [
-      `${company}의 ${metric}은 얼마입니까?`,
-      `${company}의 ${metric} 추이는 어떻습니까?`,
-      `${company}의 최근 ${metric}을 그래프로 보여줘`,
+      `${company}의 향후 ${contextKeyword} 전망을 계산해줘`,
+      `${company}의 최근 ${contextKeyword}과 매출액을 비교해줘`,
     ];
   }
 
   return [
-    metric === "PBR" ? "PBR을 구하는 공식은 무엇입니까?" : `${contextKeyword}이 높은 기업을 알려줘`,
-    metric === "PBR" ? "PBR 계산에 필요한 주가와 BPS는 무엇입니까?" : `최근 5개년 ${contextKeyword} 추이를 분석해줘`,
     `${contextKeyword}을 계산하는 데 필요한 재무제표 계정은 무엇입니까?`,
+    `최근 5개년 ${contextKeyword} 추이 전망을 분석해줘`,
   ];
 }
 

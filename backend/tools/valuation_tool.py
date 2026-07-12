@@ -333,7 +333,7 @@ def _extract_market_ratio_keys(question: str) -> list[str]:
 
 def _asks_ratio_trend(question: str) -> bool:
     normalized = question.lower().replace(" ", "")
-    return any(token in normalized for token in ["추이", "변동", "변화", "최근", "연도별", "기간별", "그래프", "비교"])
+    return any(token in normalized for token in ["추이", "변동", "변화", "최근", "연도별", "기간별", "그래프", "비교", "개년", "개년도", "년도별", "기간"])
 
 
 def _extract_year_period(question: str, available_years: list[int]) -> tuple[int, int, str]:
@@ -347,7 +347,7 @@ def _extract_year_period(question: str, available_years: list[int]) -> tuple[int
     if len(years) == 1:
         year = min(max(years[0], min_year), max_year)
         return year, year, f"{year}년"
-    match = re.search(r"최근\s*(\d+)\s*(?:개년|년)", question)
+    match = re.search(r"(?:최근\s*)?(\d+)\s*(?:개년|년)", question)
     if match:
         count = max(1, int(match.group(1)))
         start_year = max(min_year, max_year - count + 1)

@@ -411,8 +411,8 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
-    test_r2 = r2_score(y_test, y_pred)
-    test_mae = mean_absolute_error(y_test, y_pred)
+    test_r2 = float(r2_score(y_test, y_pred))
+    test_mae = float(mean_absolute_error(y_test, y_pred))
 
     model.fit(X, y)
 
