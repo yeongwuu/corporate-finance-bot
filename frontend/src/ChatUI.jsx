@@ -16,6 +16,19 @@ const INITIAL_MESSAGE = {
   },
 };
 
+const FALLBACK_RECOMMENDED_QUESTIONS = [
+  "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
+  "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
+  "셀트리온의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
+  "한화에어로스페이스의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
+  "LIG넥스원의 최근 3개년 주요 재무계정 추이를 분석해줘",
+  "에스엠의 최근 1년 주가 수익률과 변동성을 계산해줘",
+  "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
+  "삼성전자의 최근 5개년 PER 추이를 계산해줘",
+  "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
+  "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+];
+
 export default function ChatUI() {
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -32,24 +45,24 @@ export default function ChatUI() {
   const abortControllerRef = useRef(null);
 
   const [recommendedQuestions, setRecommendedQuestions] = useState([]);
-  const [recommendedQuestionsError, setRecommendedQuestionsError] = useState(false);
   const canSubmit = (input.trim().length > 0 || Boolean(attachedFile)) && !isLoading;
 
   useEffect(() => {
     const fetchRecommendedQuestions = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/recommended-questions`);
-        if (res.ok) {
-          const data = await res.json();
-          setRecommendedQuestions(data.questions || []);
-          setRecommendedQuestionsError(false);
-        } else {
-          setRecommendedQuestionsError(true);
+      for (const path of ["/api/recommended-questions", "/api/trending-questions"]) {
+        try {
+          const response = await fetch(`${API_URL}${path}`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          if (Array.isArray(data.questions) && data.questions.length > 0) {
+            setRecommendedQuestions(data.questions.slice(0, 5));
+            return;
+          }
+        } catch (error) {
+          console.warn(`Failed to fetch recommended questions from ${path}`, error);
         }
-      } catch (err) {
-        console.error("Failed to fetch recommended questions", err);
-        setRecommendedQuestionsError(true);
       }
+      setRecommendedQuestions(buildFallbackRecommendedQuestions());
     };
     fetchRecommendedQuestions();
     const interval = window.setInterval(fetchRecommendedQuestions, 600000);
@@ -377,14 +390,12 @@ export default function ChatUI() {
         </form>
       </section>
 
-      {messages.length === 1 && !isLoading ? (
-        <aside className="recommended-sidebar" aria-label="추천 질문">
-          <div className="recommended-header">
-            <span className="recommended-icon" aria-hidden="true">💡</span>
-            <strong>이런 질문은 어떠세요?</strong>
-          </div>
-          <p className="recommended-desc">챗봇이 지원하는 분석 질문을 10분마다 새롭게 보여드립니다.</p>
-          <div className="recommended-list">
+      <aside className="recommended-sidebar" aria-label="추천 질문">
+        <div className="recommended-header">
+          <span className="recommended-icon" aria-hidden="true">💡</span>
+          <strong>이런 질문은 어떠세요?</strong>
+        </div>
+        <div className="recommended-list">
           {recommendedQuestions.map((question, index) => (
             <button
               key={question}
@@ -399,12 +410,11 @@ export default function ChatUI() {
           ))}
           {recommendedQuestions.length === 0 && (
             <div className="recommended-empty" role="status">
-              {recommendedQuestionsError ? "추천 질문을 불러오지 못했습니다." : "추천 질문을 불러오는 중입니다..."}
+              추천 질문을 불러오는 중입니다...
             </div>
           )}
-          </div>
-        </aside>
-      ) : null}
+        </div>
+      </aside>
 
       {feedbackNotice ? (
         <div className="feedback-toast" role="status">
@@ -436,6 +446,15 @@ export default function ChatUI() {
         </div>
       ) : null}
     </main>
+  );
+}
+
+function buildFallbackRecommendedQuestions() {
+  const bucket = Math.floor(Date.now() / 600000);
+  const start = bucket % FALLBACK_RECOMMENDED_QUESTIONS.length;
+  return Array.from(
+    { length: 5 },
+    (_, index) => FALLBACK_RECOMMENDED_QUESTIONS[(start + index) % FALLBACK_RECOMMENDED_QUESTIONS.length],
   );
 }
 

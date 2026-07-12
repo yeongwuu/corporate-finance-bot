@@ -111,13 +111,6 @@ h2 {
   font-size: 18px;
 }
 
-.recommended-desc {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .recommended-list {
   display: grid;
   gap: 9px;
