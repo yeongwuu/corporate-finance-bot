@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import re
+import logging
 from statistics import median
 from typing import Any
+
+logger = logging.getLogger("corporate_finance_bot")
 
 from company_data.financial_store import FinancialStatementStore
 from tools.company_analysis_tool import _format_amount, _format_ratio
@@ -68,6 +71,49 @@ def forecast_company_metric(question: str) -> dict[str, Any]:
         for row in series
         if row.get(account_key) and row[account_key].get("amount") is not None
     ]
+
+    if len(values) < 3 and account_key in ["revenue", "operating_income", "net_income"]:
+        try:
+            import yfinance as yf
+            import pandas as pd
+            from tools.stock_price_tool import _to_yahoo_ticker
+            ticker = _to_yahoo_ticker(company.stock_code, company.market)
+            t = yf.Ticker(ticker)
+            df_income = t.income_stmt
+            if not df_income.empty:
+                row_candidates = []
+                if account_key == "revenue":
+                    row_candidates = ["Total Revenue", "Operating Revenue", "Revenue"]
+                elif account_key == "operating_income":
+                    row_candidates = ["Operating Income", "Operating Income or Loss"]
+                elif account_key == "net_income":
+                    row_candidates = ["Net Income", "Net Income Common Stockholders"]
+                
+                matched_row = None
+                for cand in row_candidates:
+                    if cand in df_income.index:
+                        matched_row = cand
+                        break
+                
+                if matched_row is not None:
+                    yfinance_values = []
+                    for col in df_income.columns:
+                        year = col.year if hasattr(col, "year") else int(str(col)[:4])
+                        if start_year <= year <= end_year:
+                            val = df_income.loc[matched_row, col]
+                            if hasattr(val, "iloc"):
+                                val = val.iloc[0]
+                            if val is not None and not pd.isna(val):
+                                yfinance_values.append({
+                                    "year": int(year),
+                                    "amount": float(val),
+                                    "label": ACCOUNT_LABELS.get(account_key, account_key)
+                                })
+                    if len(yfinance_values) >= 3:
+                        values = sorted(yfinance_values, key=lambda x: x["year"])
+        except Exception as e:
+            logger.error(f"yfinance income stmt fallback failed: {e}")
+
     if len(values) < 3:
         return {
             "status": "no_data",

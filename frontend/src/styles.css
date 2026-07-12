@@ -88,6 +88,8 @@ h2 {
 }
 
 .recommended-sidebar {
+  position: sticky;
+  top: 28px;
   align-self: start;
   display: grid;
   gap: 12px;
@@ -97,6 +99,8 @@ h2 {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 12px 30px rgba(74, 47, 32, 0.07);
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
 }
 
 .recommended-header {
@@ -1042,3 +1046,240 @@ h2 {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   Initial Landing Hero & Capsule Input Styles
+   ========================================================================== */
+
+.initial-hero-panel {
+  grid-column: 2 / span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 80vh;
+  padding: 32px 24px;
+  background: #f5f2ee;
+  width: 100%;
+}
+
+.initial-hero-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 660px;
+  margin: 0 auto;
+}
+
+.hero-logo-title {
+  font-size: 34px;
+  font-weight: 800;
+  color: #27323a;
+  margin-bottom: 38px;
+  letter-spacing: -0.035em;
+  text-shadow: 0 2px 4px rgba(74, 47, 32, 0.03);
+}
+
+.initial-recommend-section {
+  width: 100%;
+  margin-bottom: 28px;
+}
+
+.recommend-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.recommend-icon {
+  font-size: 16px;
+}
+
+.recommend-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+}
+
+.recommend-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.recommend-pill-btn {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  color: #27323a;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(74, 47, 32, 0.03);
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.recommend-pill-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(208, 74, 2, 0.08);
+}
+
+.recommend-pill-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Capsule Form input */
+.capsule-composer {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: #ffffff;
+  border: 1.5px solid var(--border);
+  border-radius: 9999px;
+  padding: 5px 10px 5px 22px;
+  box-shadow: 0 8px 32px rgba(74, 47, 32, 0.08);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.capsule-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 8px 32px rgba(208, 74, 2, 0.12);
+}
+
+.capsule-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: #27323a;
+  padding: 8px 0;
+  background: transparent;
+}
+
+.capsule-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.capsule-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 800;
+  margin-right: 12px;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.capsule-attachment-chip button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--accent-dark);
+  font-weight: 900;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.capsule-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.capsule-attach-btn,
+.capsule-send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background-color 160ms ease, transform 100ms ease;
+}
+
+.capsule-attach-btn {
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+.capsule-attach-btn:hover {
+  background: var(--surface-muted);
+  color: #27323a;
+}
+
+.capsule-send-btn {
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.capsule-send-btn:hover:not(:disabled) {
+  background: var(--accent-dark);
+  transform: scale(1.02);
+}
+
+.capsule-send-btn:disabled {
+  background: var(--border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+@media (max-width: 1080px) {
+  .initial-hero-panel {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .initial-hero-panel {
+    grid-column: 1;
+    min-height: calc(100vh - 120px);
+  }
+  
+  .hero-logo-title {
+    font-size: 26px;
+    margin-bottom: 24px;
+  }
+  
+  .recommend-pill-btn {
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  
+  .capsule-composer {
+    padding: 4px 6px 4px 16px;
+  }
+  
+  .capsule-input {
+    font-size: 13.5px;
+  }
+}
+

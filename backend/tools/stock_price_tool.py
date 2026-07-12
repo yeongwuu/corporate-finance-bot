@@ -101,6 +101,13 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
             f"요청 기간({period['requested_start']}~{period['requested_end']}) 데이터가 비어 있어 확인 가능한 과거 구간으로 재조회했습니다.",
         )
 
+    serializable_period = {}
+    for k, v in period.items():
+        if isinstance(v, date):
+            serializable_period[k] = v.isoformat()
+        else:
+            serializable_period[k] = v
+
     return {
         "status": "ok",
         "summary": summary,
@@ -108,7 +115,7 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
         "company": company.__dict__,
         "ticker": ticker,
         "price_source": price_source,
-        "period": period,
+        "period": serializable_period,
         "prices": prices,
         "stats": stats,
     }

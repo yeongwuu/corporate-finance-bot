@@ -43,6 +43,11 @@ export default function ChatUI() {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isLoading]);
 
   const [recommendedQuestions, setRecommendedQuestions] = useState([]);
   const canSubmit = (input.trim().length > 0 || Boolean(attachedFile)) && !isLoading;
@@ -303,7 +308,107 @@ export default function ChatUI() {
         </div>
       </aside>
 
-      <section className="chat-panel" aria-label="채팅">
+      {isInitialState ? (
+        <section className="initial-hero-panel">
+          <div className="initial-hero-container">
+            <h1 className="hero-logo-title">🏦 Corporate Finance Bot</h1>
+            
+            <div className="initial-recommend-section">
+              <div className="recommend-title">
+                <span className="recommend-icon">💡</span>
+                <strong>이런 질문은 어떠세요?</strong>
+              </div>
+              <div className="recommend-grid">
+                <div className="recommend-row upper-row">
+                  {recommendedQuestions.slice(0, 3).map((q, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="recommend-pill-btn"
+                      onClick={() => handleRecommendedQuestionClick(q)}
+                      disabled={isLoading}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+                <div className="recommend-row lower-row">
+                  {recommendedQuestions.slice(3, 5).map((q, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="recommend-pill-btn"
+                      onClick={() => handleRecommendedQuestionClick(q)}
+                      disabled={isLoading}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <form
+              className="capsule-composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (isLoading) return;
+                sendMessage();
+              }}
+            >
+              {attachedFile ? (
+                <div className="capsule-attachment-chip">
+                  <span>{attachedFile.name}</span>
+                  <button type="button" onClick={() => setAttachedFile(null)} aria-label="첨부파일 제거">
+                    ✕
+                  </button>
+                </div>
+              ) : null}
+              
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="이곳에 질문을 입력하세요!"
+                className="capsule-input"
+                disabled={isLoading}
+              />
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="file-input"
+                style={{ display: 'none' }}
+                accept=".txt,.md,.csv,.json,.pdf,image/*"
+                onChange={(event) => setAttachedFile(event.target.files?.[0] || null)}
+              />
+              
+              <div className="capsule-actions">
+                <button
+                  type="button"
+                  className="capsule-attach-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                  title="파일 업로드"
+                >
+                  📎
+                </button>
+                <button
+                  type="submit"
+                  className="capsule-send-btn"
+                  disabled={!canSubmit}
+                  title="전송"
+                >
+                  🚀
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="chat-panel" aria-label="채팅">
         <div className="message-list">
           {messages.map((message, index) => (
             <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
@@ -328,6 +433,7 @@ export default function ChatUI() {
               <LoadingTrace activeStep={activeStep} />
             </article>
           ) : null}
+          <div ref={messagesEndRef} />
         </div>
 
         <form
@@ -415,6 +521,8 @@ export default function ChatUI() {
           )}
         </div>
       </aside>
+      </>
+      )}
 
       {feedbackNotice ? (
         <div className="feedback-toast" role="status">
@@ -713,9 +821,11 @@ function buildExampleCompanies(suggestedCompanies) {
 }
 
 function shouldShowAlternativeQuestions(answer, data) {
+  const status = data?.calculation?.status || data?.status;
+  if (status === "ok") return false;
+
   const normalized = String(answer || "").replace(/\s+/g, " ").toLowerCase();
   if (normalized.includes("load failed")) return true;
-  const status = data?.calculation?.status || data?.status;
   const failureStatuses = new Set([
     "error",
     "missing_data",

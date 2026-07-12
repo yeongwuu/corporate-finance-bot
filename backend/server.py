@@ -3,6 +3,7 @@ import os
 import random
 import smtplib
 import time
+from datetime import datetime
 from threading import Lock
 from email.message import EmailMessage
 from pathlib import Path
@@ -125,9 +126,11 @@ def health_check() -> dict:
     return {"status": "ok"}
 
 
+import os
+
 RECOMMENDED_QUESTION_TTL_SECONDS = 10 * 60
 RECOMMENDED_QUESTION_COUNT = 5
-RECOMMENDED_QUESTION_POOL = (
+DEFAULT_SEEDS = [
     "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
     "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
     "셀트리온의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
@@ -137,16 +140,126 @@ RECOMMENDED_QUESTION_POOL = (
     "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
     "삼성전자의 최근 5개년 PER 추이를 계산해줘",
     "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
-    "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
-)
+    "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘"
+]
 
 _cached_questions: list[str] = []
 _last_refreshed = 0.0
 _question_cache_lock = Lock()
+_file_write_lock = threading.Lock()
+QUESTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "successful_questions.json")
+
+def _init_questions_file():
+    os.makedirs(os.path.dirname(QUESTIONS_FILE), exist_ok=True)
+    if not os.path.exists(QUESTIONS_FILE):
+        with _file_write_lock:
+            with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(DEFAULT_SEEDS, f, ensure_ascii=False, indent=2)
+
+def log_successful_question(question: str):
+    _init_questions_file()
+    cleaned = question.strip()
+    if not cleaned or len(cleaned) < 5 or len(cleaned) > 100:
+        return
+    with _file_write_lock:
+        try:
+            if os.path.exists(QUESTIONS_FILE):
+                with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                    questions = json.load(f)
+            else:
+                questions = list(DEFAULT_SEEDS)
+            
+            if cleaned not in questions:
+                questions.append(cleaned)
+                if len(questions) > 200:
+                    questions = questions[-200:]
+                with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(questions, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to log successful question: {e}")
+
+FAILED_QUESTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "failed_questions.json")
+
+def log_failed_question(question: str, status: str, error_message: str):
+    os.makedirs(os.path.dirname(FAILED_QUESTIONS_FILE), exist_ok=True)
+    cleaned = question.strip()
+    if not cleaned:
+        return
+    log_entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "question": cleaned,
+        "status": status,
+        "error_message": error_message[:300]
+    }
+    with _file_write_lock:
+        try:
+            if os.path.exists(FAILED_QUESTIONS_FILE):
+                with open(FAILED_QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                    failed_list = json.load(f)
+            else:
+                failed_list = []
+            failed_list.append(log_entry)
+            if len(failed_list) > 300:
+                failed_list = failed_list[-300:]
+            with open(FAILED_QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(failed_list, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return only questions covered by existing data and routing paths."""
-    return random.sample(RECOMMENDED_QUESTION_POOL, RECOMMENDED_QUESTION_COUNT)
+    """Return only questions from the verified successful questions database."""
+    _init_questions_file()
+    with _file_write_lock:
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                questions = json.load(f)
+        except Exception:
+            questions = list(DEFAULT_SEEDS)
+    
+    if len(questions) < RECOMMENDED_QUESTION_COUNT:
+        questions = list(set(questions + DEFAULT_SEEDS))
+    
+    return random.sample(questions, RECOMMENDED_QUESTION_COUNT)
+
+
+def find_similar_successful_questions(user_question: str) -> list[str]:
+    """Find the top 3 most semantically similar successful questions from database."""
+    _init_questions_file()
+    with _file_write_lock:
+        try:
+            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                questions = json.load(f)
+        except Exception:
+            questions = list(DEFAULT_SEEDS)
+
+    def get_tokens(text: str) -> set[str]:
+        tokens = re.findall(r'[가-힣a-zA-Z0-9]{2,}', text.lower())
+        stops = {"최근", "가지고", "보여줘", "알려줘", "계산해줘", "분석해줘", "추이를", "어떻게", "얼마야", "알려줘"}
+        return {t for t in tokens if t not in stops}
+
+    user_tokens = get_tokens(user_question)
+    if not user_tokens:
+        return random.sample(questions, 3) if len(questions) >= 3 else list(DEFAULT_SEEDS[:3])
+
+    scored_questions = []
+    for q in questions:
+        if q.strip() == user_question.strip():
+            continue
+        q_tokens = get_tokens(q)
+        intersection = user_tokens.intersection(q_tokens)
+        score = len(intersection)
+        union = user_tokens.union(q_tokens)
+        jaccard = score / len(union) if union else 0.0
+        scored_questions.append((q, score, jaccard))
+
+    scored_questions.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    results = [q for q, s, j in scored_questions[:3]]
+
+    if len(results) < 3:
+        fillers = [q for q in DEFAULT_SEEDS if q not in results]
+        results.extend(random.sample(fillers, 3 - len(results)))
+
+    return results[:3]
 
 
 @app.get("/api/recommended-questions")
@@ -185,9 +298,23 @@ def chat(request: ChatRequest) -> StreamingResponse:
                 attachment=request.attachment,
                 on_step=on_step
             )
+            if res.get("status") == "ok" and not request.attachment:
+                log_successful_question(request.question)
+            elif res.get("status") != "ok":
+                log_failed_question(
+                    question=request.question,
+                    status=res.get("status", "error"),
+                    error_message=res.get("summary") or res.get("message") or "질문 해석 및 연산 오류"
+                )
+            res["suggestions"] = find_similar_successful_questions(request.question)
             q.put(f"event: result\ndata: {json.dumps(res, ensure_ascii=False)}\n\n")
         except Exception as e:
             logger.exception("Agent execution failed")
+            log_failed_question(
+                question=request.question,
+                status="system_exception",
+                error_message=str(e)
+            )
             q.put(f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n")
         finally:
             q.put(None)
