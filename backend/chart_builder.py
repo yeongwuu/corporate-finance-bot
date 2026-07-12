@@ -31,6 +31,8 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
         return _build_forecast_chart(calculation)
     if tool_name == "stock_price_tool":
         return _build_stock_price_chart(calculation)
+    if tool_name == "valuation_tool":
+        return _build_market_ratio_chart(calculation)
     return None
 
 
@@ -189,6 +191,48 @@ def _build_industry_growth_comparison_chart(calculation: dict[str, Any]) -> dict
         "subtitle": subtitle,
         "unit": "PERCENT",
         "bars": bars,
+    }
+
+
+def _build_market_ratio_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    if calculation.get("mode") != "market_ratio_trend":
+        return None
+    rows = calculation.get("market_ratio_series") or []
+    ratio_keys = calculation.get("ratio_keys") or []
+    if len(rows) < 2 or not ratio_keys:
+        return None
+
+    datasets = []
+    for ratio_key in ratio_keys:
+        points = []
+        label = None
+        for row in rows:
+            ratio = (row.get("ratios") or {}).get(ratio_key)
+            if not ratio:
+                continue
+            label = ratio.get("label") or ratio_key.upper()
+            points.append(
+                {
+                    "x": int(row["year"]),
+                    "y": float(ratio["value"]),
+                    "label": f"{row['year']}년",
+                    "display": f"{ratio['display']}배",
+                }
+            )
+        if len(points) >= 2:
+            datasets.append({"key": ratio_key, "label": label, "points": points})
+
+    if not datasets:
+        return None
+
+    company = calculation.get("company") or {}
+    period = calculation.get("period") or {}
+    return {
+        "type": "line",
+        "title": f"{company.get('company_name', '기업')} 밸류에이션 배수 추이",
+        "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
+        "unit": "MULTIPLE",
+        "datasets": datasets,
     }
 
 

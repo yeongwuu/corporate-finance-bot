@@ -23,6 +23,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_industry_rank_answer(calculation)
     if calculation.get("mode") == "industry_growth_comparison":
         return build_industry_growth_comparison_answer(calculation)
+    if calculation.get("mode") == "market_ratio_trend":
+        return build_market_ratio_trend_answer(calculation)
     if calculation.get("ratio_series"):
         return build_ratio_trend_answer(calculation)
     if calculation.get("comparison"):
@@ -130,6 +132,41 @@ def build_ratio_trend_answer(calculation: dict) -> str:
         lines.append(f"{last['label']}은 {first['year']}년 {first['display']}에서 {last['year']}년 {last['display']}로 {direction}했습니다.")
 
     lines.append("계산에는 보유 재무제표의 손익계산서와 재무상태표 주요 계정을 사용했습니다.")
+    return "\n".join(lines)
+
+
+def build_market_ratio_trend_answer(calculation: dict) -> str:
+    company = calculation.get("company") or {}
+    period = calculation.get("period") or {}
+    rows = calculation.get("market_ratio_series") or []
+    ratio_keys = calculation.get("ratio_keys") or []
+    company_name = company.get("company_name", "해당 기업")
+    labels = ", ".join({"per": "PER", "pbr": "PBR", "psr": "PSR"}.get(key, key.upper()) for key in ratio_keys)
+    lines = [
+        f"{company_name}의 {period.get('start_year')}~{period.get('end_year')}년 {labels} 추이는 다음과 같습니다."
+    ]
+
+    for row in rows:
+        values = ", ".join(f"{item['label']} {item['display']}배" for item in row.get("ratios", {}).values())
+        if values:
+            lines.append(f"{row['year']}년: {values}")
+
+    for ratio_key in ratio_keys:
+        values = [
+            {"year": row["year"], **row["ratios"][ratio_key]}
+            for row in rows
+            if ratio_key in row.get("ratios", {})
+        ]
+        if len(values) < 2:
+            continue
+        first, last = values[0], values[-1]
+        direction = "상승" if last["value"] > first["value"] else "하락" if last["value"] < first["value"] else "유지"
+        lines.append(
+            f"{last['label']}은 {first['year']}년 {first['display']}배에서 "
+            f"{last['year']}년 {last['display']}배로 {direction}했습니다."
+        )
+
+    lines.append("계산은 연도말 종가와 상장주식수로 시가총액을 추정한 뒤 재무제표의 순이익, 자본총계, 매출액과 결합했습니다.")
     return "\n".join(lines)
 
 
@@ -398,9 +435,6 @@ def build_latest_news_answer(calculation: dict) -> str:
 
     snippet = _clean_news_text(matched_doc.get("snippet") or matched_doc.get("title") or "")
     operating_income = _extract_operating_income(snippet)
-    source_url = matched_doc.get("source_url")
-    source_line = f"- 관련 출처: {source_url}" if source_url else f"- 관련 출처: {matched_doc.get('title', '뉴스 검색 결과')}"
-
     if operating_income:
         first_sentence = f"{company}{_period_suffix(period)} 영업이익은 뉴스 기준으로 {operating_income}{_amount_copula(operating_income)}"
     else:
@@ -413,7 +447,6 @@ def build_latest_news_answer(calculation: dict) -> str:
         [
             first_sentence,
             f"뉴스 요약에서는 {evidence}",
-            source_line,
             "확정 수치는 원문 기사와 DART 잠정실적 공시를 함께 확인하는 것이 좋습니다.",
         ]
     )
@@ -589,6 +622,7 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
         "금지 표현:\n"
         "- RAG, backend, frontend, API, tool, calculation, 내부 지식 문서, 추가 근거, 확인 문서 같은 구현 용어를 답변에 쓰지 않는다.\n"
         "- 불필요한 Markdown 볼드체, 장식 이모티콘, 체크리스트형 '확인해야 할 추가 근거' 섹션을 만들지 않는다.\n\n"
+        "- 출처 URL은 프론트엔드 하단 출처 카드에서 별도로 표시되므로 본문에 URL을 길게 나열하지 않는다.\n\n"
         "형식 원칙:\n"
         "- 기본은 소제목 없이 1~3개 자연스러운 문단으로 답한다.\n"
         "- 사용자가 비교, 추이, 원인 분석, 여러 지표 분석을 요청한 경우에만 필요한 소제목을 사용한다.\n"

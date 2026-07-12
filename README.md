@@ -136,7 +136,7 @@ Notion 포트폴리오에서 면접관이 접속할 수 있게 하려면 공개 
 - Web은 `VITE_API_HOSTNAME`으로 API 서비스의 Render 호스트명을 받아 `https://...` API를 호출합니다.
 - API는 `BACKEND_CORS_ORIGIN_REGEX=https://.*\.onrender\.com` 설정으로 Render 정적 사이트의 요청을 허용합니다.
 - `backend/data/financials.sqlite.gz`를 사용해 배포 환경에서 엑셀 전체 파싱 시간을 줄입니다.
-- 분석 실패/데이터 부족 답변은 사용자 동의 팝업 후 `/api/feedback-email`로 질문과 답변을 전송할 수 있습니다. 이메일 발송에는 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `FEEDBACK_EMAIL_TO`가 필요합니다. Gmail을 쓰는 경우 `SMTP_HOST`는 생략 가능하며 `SMTP_USERNAME`과 앱 비밀번호 형태의 `SMTP_PASSWORD`를 설정합니다.
+- 분석 실패/데이터 부족 답변은 사용자 동의 팝업 후 `/api/feedback-email`로 질문과 답변을 전송할 수 있습니다. 이메일 발송에는 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` 또는 `SMTP_APP_PASSWORD`, `SMTP_FROM_EMAIL`, `FEEDBACK_EMAIL_TO`가 필요합니다. 네이버/구글 계정은 일반 로그인 비밀번호가 아니라 애플리케이션 비밀번호를 사용해야 합니다.
 - 이미지/PDF 첨부파일 문제 풀이는 비전 입력을 지원하는 LLM 설정이 필요합니다. Render API 서비스 환경변수에 `LLM_PROVIDER=gemini`, `LLM_MODEL=gemini-3.1-flash-lite`, `LLM_API_KEY` 또는 `GEMINI_API_KEY`를 설정합니다. OpenAI를 쓰는 경우 `LLM_PROVIDER=openai`, `LLM_MODEL`, `OPENAI_API_KEY` 또는 `LLM_API_KEY`를 설정합니다.
 
 포트폴리오 공개용으로는 Render 무료 인스턴스를 사용할 수 있지만, 무료 인스턴스는 비활성 상태 후 첫 요청이 느릴 수 있습니다. 면접 직전에는 배포 URL을 한 번 열어 API가 깨어 있는지 확인하는 편이 좋습니다.

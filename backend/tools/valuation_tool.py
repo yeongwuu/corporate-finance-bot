@@ -1,8 +1,18 @@
 import re
+import urllib.request
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
+
+from company_data.financial_store import FinancialStatementStore
+from tools.stock_price_tool import _download_naver_price_data, _download_price_data, _to_yahoo_ticker
 
 
 def analyze_valuation(question: str) -> dict:
+    market_trend = calculate_market_ratio_trend(question)
+    if market_trend["status"] in {"ok", "missing_shares", "price_fetch_error"}:
+        return market_trend
+
     if "유보율" in question and "per" in question.lower() and "pbr" in question.lower() and "roe" in question.lower():
         return calculate_growth_from_per_pbr(question)
 
@@ -22,6 +32,118 @@ def analyze_valuation(question: str) -> dict:
             "성장률: g = 유보율 * ROE",
             "NPVGO = 성장모형 주가 - 무성장모형 주가",
         ],
+    }
+
+
+def calculate_market_ratio_trend(question: str) -> dict[str, Any]:
+    ratio_keys = _extract_market_ratio_keys(question)
+    if not ratio_keys or not _asks_ratio_trend(question):
+        return {"status": "no_calculation", "summary": "", "steps": []}
+
+    store = FinancialStatementStore()
+    try:
+        company = store.resolve_company(question)
+    except FileNotFoundError as exc:
+        return {
+            "status": "missing_data",
+            "summary": "재무제표 데이터에서 회사를 확인하지 못했습니다.",
+            "steps": [str(exc)],
+        }
+    if not company:
+        return {
+            "status": "needs_company",
+            "summary": "PER/PBR/PSR 추이를 계산할 회사명을 찾지 못했습니다.",
+            "steps": ["예: 삼성전자 최근 7개년 PER 변동, SK하이닉스 2021~2025년 PBR 추이"],
+        }
+
+    available_years = store.available_years(company.stock_code)
+    if not available_years:
+        return {
+            "status": "no_data",
+            "summary": f"{company.company_name}의 재무제표 연도 데이터를 찾지 못했습니다.",
+            "steps": [],
+            "company": company.__dict__,
+        }
+
+    start_year, end_year, period_label = _extract_year_period(question, available_years)
+    account_keys = _required_accounts_for_market_ratios(ratio_keys)
+    financial_rows = store.get_account_series(company.stock_code, account_keys, start_year, end_year)
+    shares = _fetch_listed_shares(company.stock_code)
+    if not shares:
+        return {
+            "status": "missing_shares",
+            "summary": f"{company.company_name}의 PER/PBR/PSR 추이를 계산하려면 상장주식수 데이터가 필요합니다.",
+            "steps": [
+                "PER/PBR/PSR은 연도별 시가총액과 재무제표 계정을 결합해 계산합니다.",
+                "시가총액 = 연도말 종가 * 상장주식수",
+                "네이버 금융에서 상장주식수를 확인하지 못했습니다.",
+            ],
+            "company": company.__dict__,
+            "ratio_keys": ratio_keys,
+        }
+
+    rows = []
+    price_errors = []
+    for row in financial_rows:
+        fiscal_year = int(row["year"])
+        close = _fetch_year_end_close(company.stock_code, company.market, fiscal_year)
+        if close is None:
+            price_errors.append(str(fiscal_year))
+            continue
+        market_cap = close * shares
+        ratio_row = {
+            "year": fiscal_year,
+            "close": close,
+            "shares": shares,
+            "market_cap": market_cap,
+            "ratios": {},
+        }
+        for ratio_key in ratio_keys:
+            value = _calculate_market_ratio_value(ratio_key, market_cap, row)
+            if value is None:
+                continue
+            ratio_row["ratios"][ratio_key] = {
+                "label": _market_ratio_label(ratio_key),
+                "value": value,
+                "display": format_number_float(value),
+            }
+        if ratio_row["ratios"]:
+            rows.append(ratio_row)
+
+    if not rows:
+        return {
+            "status": "price_fetch_error" if price_errors else "no_data",
+            "summary": f"{company.company_name}의 {period_label} PER/PBR/PSR 계산에 필요한 결합 데이터를 만들지 못했습니다.",
+            "steps": [
+                "필요 데이터: 연도별 종가, 상장주식수, 순이익/자본총계/매출액",
+                f"주가 조회 실패 연도: {', '.join(price_errors)}" if price_errors else "계산 가능한 재무제표 계정이 부족합니다.",
+            ],
+            "company": company.__dict__,
+            "ratio_keys": ratio_keys,
+        }
+
+    labels = ", ".join(_market_ratio_label(key) for key in ratio_keys)
+    steps = [
+        f"조회 대상: {company.company_name}({company.stock_code}), {period_label}",
+        f"상장주식수: {shares:,.0f}주",
+        "시가총액은 연도말 종가와 상장주식수를 곱해 추정했습니다.",
+        "계산식: PER = 시가총액 / 당기순이익, PBR = 시가총액 / 자본총계, PSR = 시가총액 / 매출액",
+    ]
+    for row in rows:
+        ratio_text = ", ".join(f"{item['label']} {item['display']}" for item in row["ratios"].values())
+        steps.append(f"{row['year']}년: 연도말 종가 {_format_krw(row['close'])}, 시가총액 {_format_amount_float(row['market_cap'])}, {ratio_text}")
+    if price_errors:
+        steps.append(f"주가를 가져오지 못해 제외한 연도: {', '.join(price_errors)}")
+
+    return {
+        "status": "ok",
+        "mode": "market_ratio_trend",
+        "summary": f"{company.company_name}의 {period_label} {labels} 추이를 계산했습니다.",
+        "steps": steps,
+        "company": company.__dict__,
+        "period": {"start_year": rows[0]["year"], "end_year": rows[-1]["year"], "source": period_label},
+        "ratio_keys": ratio_keys,
+        "market_ratio_series": rows,
     }
 
 
@@ -188,6 +310,139 @@ def calculate_growth_from_per_pbr(question: str) -> dict:
         "summary": "PER/PBR 역산에는 PER, PBR, 유보율이 필요합니다.",
         "steps": [],
     }
+
+
+def _extract_market_ratio_keys(question: str) -> list[str]:
+    normalized = question.lower().replace(" ", "")
+    keys = []
+    if "per" in normalized or "주가수익비율" in normalized:
+        keys.append("per")
+    if "pbr" in normalized or "주가순자산" in normalized:
+        keys.append("pbr")
+    if "psr" in normalized or "주가매출" in normalized:
+        keys.append("psr")
+    if any(token in normalized for token in ["시장가치비율", "밸류에이션배수", "valuationmultiple", "주요배수"]):
+        keys.extend(["per", "pbr", "psr"])
+    deduped = []
+    for key in keys:
+        if key not in deduped:
+            deduped.append(key)
+    return deduped
+
+
+def _asks_ratio_trend(question: str) -> bool:
+    normalized = question.lower().replace(" ", "")
+    return any(token in normalized for token in ["추이", "변동", "변화", "최근", "연도별", "기간별", "그래프", "비교"])
+
+
+def _extract_year_period(question: str, available_years: list[int]) -> tuple[int, int, str]:
+    years = [int(year) for year in re.findall(r"20[0-3]\d", question)]
+    min_year, max_year = min(available_years), max(available_years)
+    if len(years) >= 2:
+        start_year, end_year = min(years[:2]), max(years[:2])
+        start_year = max(start_year, min_year)
+        end_year = min(end_year, max_year)
+        return start_year, end_year, f"{start_year}~{end_year}년"
+    if len(years) == 1:
+        year = min(max(years[0], min_year), max_year)
+        return year, year, f"{year}년"
+    match = re.search(r"최근\s*(\d+)\s*(?:개년|년)", question)
+    if match:
+        count = max(1, int(match.group(1)))
+        start_year = max(min_year, max_year - count + 1)
+        return start_year, max_year, f"최근 {count}개년"
+    start_year = max(min_year, max_year - 4)
+    return start_year, max_year, "기본값: 최근 5개년"
+
+
+def _required_accounts_for_market_ratios(ratio_keys: list[str]) -> list[str]:
+    required = []
+    mapping = {
+        "per": ["net_income"],
+        "pbr": ["total_equity"],
+        "psr": ["revenue"],
+    }
+    for ratio_key in ratio_keys:
+        for account_key in mapping.get(ratio_key, []):
+            if account_key not in required:
+                required.append(account_key)
+    return required
+
+
+def _calculate_market_ratio_value(ratio_key: str, market_cap: float, row: dict[str, Any]) -> float | None:
+    denominator_key = {
+        "per": "net_income",
+        "pbr": "total_equity",
+        "psr": "revenue",
+    }.get(ratio_key)
+    if not denominator_key:
+        return None
+    account = row.get(denominator_key)
+    amount = account.get("amount") if isinstance(account, dict) else None
+    if amount in (None, 0):
+        return None
+    return market_cap / float(amount)
+
+
+def _fetch_year_end_close(stock_code: str, market: str | None, fiscal_year: int) -> float | None:
+    start = date(fiscal_year, 12, 1)
+    end = date(fiscal_year, 12, 31)
+    try:
+        frame = _download_naver_price_data(stock_code, start, end)
+    except Exception:
+        frame = None
+    if frame is not None and not frame.empty:
+        return float(frame["Close"].iloc[-1])
+    try:
+        frame = _download_price_data(_to_yahoo_ticker(stock_code, market), start, end)
+    except Exception:
+        frame = None
+    if frame is not None and not frame.empty:
+        return float(frame["Close"].iloc[-1])
+    return None
+
+
+def _fetch_listed_shares(stock_code: str) -> float | None:
+    url = f"https://finance.naver.com/item/main.naver?code={stock_code.zfill(6)}"
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            html = response.read().decode(charset, errors="ignore")
+    except Exception:
+        return None
+
+    patterns = [
+        r"상장주식수</th>\s*<td[^>]*>\s*<em[^>]*>([0-9,]+)</em>",
+        r"상장주식수[^0-9]{0,80}([0-9,]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.S)
+        if match:
+            return float(match.group(1).replace(",", ""))
+    return None
+
+
+def _market_ratio_label(ratio_key: str) -> str:
+    return {"per": "PER", "pbr": "PBR", "psr": "PSR"}.get(ratio_key, ratio_key.upper())
+
+
+def _format_krw(value: float) -> str:
+    return f"{round(value):,}원"
+
+
+def _format_amount_float(amount: float) -> str:
+    sign = "-" if amount < 0 else ""
+    amount = abs(amount)
+    if amount >= 1_0000_0000_0000:
+        return f"{sign}{amount / 1_0000_0000_0000:.2f}조원"
+    if amount >= 1_0000_0000:
+        return f"{sign}{amount / 1_0000_0000:.2f}억원"
+    return f"{sign}{amount:,.0f}원"
+
+
+def format_number_float(value: float) -> str:
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP).normalize().to_eng_string()
 
 
 def find_money(text: str, labels: list[str]) -> Decimal | None:

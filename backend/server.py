@@ -142,13 +142,14 @@ def send_feedback_email(request: FeedbackEmailRequest) -> dict:
 
 
 def _send_feedback_email(request: FeedbackEmailRequest) -> dict:
-    username = _get_config("SMTP_USERNAME") or _get_config("SMTP_USER")
-    password = _get_config("SMTP_PASSWORD") or _get_config("SMTP_PASS")
+    username = _first_config("SMTP_USERNAME", "SMTP_USER", "SMTP_EMAIL", "NAVER_EMAIL", "NAVER_USERNAME")
+    password = _first_config("SMTP_PASSWORD", "SMTP_PASS", "SMTP_APP_PASSWORD", "NAVER_APP_PASSWORD", "NAVER_PASSWORD")
     host = _get_config("SMTP_HOST") or _default_smtp_host(username)
-    port = int(_get_config("SMTP_PORT") or "587")
+    port = _parse_int_config("SMTP_PORT", 587)
     from_email = _get_config("SMTP_FROM_EMAIL") or _get_config("SMTP_FROM") or username
     to_email = _get_config("FEEDBACK_EMAIL_TO") or _get_config("FEEDBACK_TO") or "11xcv@naver.com"
     use_tls = (_get_config("SMTP_USE_TLS") or "true").lower() != "false"
+    use_ssl = (_get_config("SMTP_USE_SSL") or "").lower() == "true" or port == 465
 
     if not all([host, username, password, from_email]):
         _write_feedback_fallback(request, "missing_smtp_config")
@@ -180,15 +181,22 @@ def _send_feedback_email(request: FeedbackEmailRequest) -> dict:
     )
 
     try:
-        with smtplib.SMTP(host, port, timeout=15) as smtp:
-            if use_tls:
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_class(host, port, timeout=20) as smtp:
+            smtp.ehlo()
+            if use_tls and not use_ssl:
                 smtp.starttls()
+                smtp.ehlo()
             smtp.login(username, password)
             smtp.send_message(message)
-    except Exception:
+    except Exception as exc:
         logger.exception("Feedback email send failed")
-        _write_feedback_fallback(request, "smtp_send_failed")
-        return {"status": "error", "message": "피드백 이메일 전송에 실패해 서버 로그에 저장했습니다."}
+        _write_feedback_fallback(request, f"smtp_send_failed: {_smtp_error_summary(exc)}")
+        return {
+            "status": "error",
+            "message": "피드백 이메일 전송에 실패해 서버 로그에 저장했습니다.",
+            "detail": _smtp_error_summary(exc),
+        }
 
     return {"status": "ok", "message": "피드백 이메일을 전송했습니다."}
 
@@ -227,6 +235,37 @@ def _get_config(name: str) -> str | None:
                 cleaned = raw_value.strip().strip('"').strip("'")
                 return cleaned or None
     return None
+
+
+def _first_config(*names: str) -> str | None:
+    for name in names:
+        value = _get_config(name)
+        if value:
+            return value
+    return None
+
+
+def _parse_int_config(name: str, default: int) -> int:
+    value = _get_config(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer config %s=%s. Falling back to %s", name, value, default)
+        return default
+
+
+def _smtp_error_summary(exc: Exception) -> str:
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return "SMTP authentication failed. 네이버/구글 계정은 일반 비밀번호가 아니라 애플리케이션 비밀번호가 필요합니다."
+    if isinstance(exc, smtplib.SMTPConnectError):
+        return "SMTP connection failed. SMTP_HOST와 SMTP_PORT를 확인하세요."
+    if isinstance(exc, smtplib.SMTPServerDisconnected):
+        return "SMTP server disconnected. TLS/SSL 설정이나 포트를 확인하세요."
+    if isinstance(exc, TimeoutError):
+        return "SMTP connection timed out. Render 네트워크 또는 SMTP 포트 설정을 확인하세요."
+    return exc.__class__.__name__
 
 
 def _default_smtp_host(username: str | None) -> str | None:

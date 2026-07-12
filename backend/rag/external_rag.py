@@ -44,16 +44,17 @@ def search_external_docs(query: str, company_name: str | None = None, limit: int
         text = path.read_text(encoding="utf-8")
         if company_name and not _document_matches_company(path, text, company_name):
             continue
-        metadata = parse_metadata(text)
         for chunk_index, chunk in enumerate(chunk_text(text)):
             score = score_chunk(chunk, terms, company_name)
             if score <= 0:
                 continue
+            metadata = parse_metadata(chunk) or parse_metadata(text)
             scored_chunks.append(
                 {
                     "title": path.stem,
                     "source": str(path),
                     "source_url": metadata.get("source_url"),
+                    "image_url": metadata.get("image_url"),
                     "score": score,
                     "chunk_index": chunk_index,
                     "snippet": make_snippet(chunk, terms),

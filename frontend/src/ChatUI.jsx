@@ -109,7 +109,7 @@ export default function ChatUI() {
             animate: true,
             tool: data.tool,
             status: data.calculation?.status,
-            references: data.references?.length || 0,
+            references: buildDisplayReferences(data.references),
             chart: data.chart,
             trace: data.trace || [],
             suggestions: shouldShowAlternativeQuestions(answer, data)
@@ -186,6 +186,7 @@ export default function ChatUI() {
       setPendingFeedback(null);
     } catch (error) {
       setFeedbackNotice(error.message || "이메일 전송에 실패했습니다.");
+      setPendingFeedback(null);
     } finally {
       setIsSendingFeedback(false);
     }
@@ -380,6 +381,7 @@ function MessageText({ message, onAskSuggestion }) {
           <div className="message-body">{formatAnswerText(visibleText)}</div>
           <ChartPanel chart={message.meta?.chart} compact />
           <SuggestionPanel suggestions={message.meta?.suggestions} onAskSuggestion={onAskSuggestion} />
+          <SourcePanel references={message.meta?.references} />
         </>
       )}
       {!isInitialAssistantMessage ? (
@@ -435,6 +437,34 @@ function SuggestionPanel({ suggestions, onAskSuggestion }) {
           <button key={suggestion} type="button" onClick={() => onAskSuggestion?.(suggestion)}>
             {suggestion}
           </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourcePanel({ references }) {
+  if (!references?.length) return null;
+  return (
+    <div className="source-panel" aria-label="답변 출처">
+      <strong>출처</strong>
+      <div className="source-list">
+        {references.map((reference, index) => (
+          <a
+            key={`${reference.source_url}-${index}`}
+            className={`source-item${reference.image_url ? "" : " no-image"}`}
+            href={reference.source_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {reference.image_url ? (
+              <img src={reference.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+            ) : null}
+            <span>
+              <b>{reference.title || `출처 ${index + 1}`}</b>
+              {reference.snippet ? <em>{reference.snippet}</em> : null}
+            </span>
+          </a>
         ))}
       </div>
     </div>
@@ -533,6 +563,8 @@ function shouldAskFeedbackConsent(data, answer) {
     "확인할 수 없습니다",
     "제공하기 어렵습니다",
     "분석하기 어렵습니다",
+    "어렵습니다",
+    "어려워",
     "데이터가 부족",
     "정보가 부족",
     "답변을 생성하지 못했습니다",
@@ -563,6 +595,8 @@ function shouldShowAlternativeQuestions(answer, data) {
     "제공하기 어렵습니다",
     "분석하기 어렵습니다",
     "계산하기 어렵습니다",
+    "어렵습니다",
+    "어려워",
     "계산하기에는 정보가 부족",
     "현재 확보된 자료만으로는",
     "데이터가 부족",
@@ -573,17 +607,44 @@ function shouldShowAlternativeQuestions(answer, data) {
   ].some((phrase) => normalized.includes(phrase.toLowerCase()));
 }
 
+function buildDisplayReferences(references) {
+  const seen = new Set();
+  return (references || [])
+    .filter((reference) => reference?.source_url)
+    .filter((reference) => {
+      const key = reference.source_url;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 3)
+    .map((reference) => ({
+      title: cleanReferenceTitle(reference.title),
+      source_url: reference.source_url,
+      image_url: reference.image_url,
+      snippet: buildPreview(reference.snippet || ""),
+    }));
+}
+
+function cleanReferenceTitle(title) {
+  return String(title || "")
+    .replace(/^news_/, "")
+    .replace(/_/g, " ")
+    .trim();
+}
+
 function buildAlternativeQuestions(question) {
   const companyNames = extractCompanies(question);
   const metric = extractMetric(question);
+  const contextKeyword = extractContextKeyword(question, metric);
 
   if (companyNames.length >= 2) {
     const first = companyNames[0];
     const second = companyNames[1];
     return [
-      `${first}의 ${metric}은 얼마입니까?`,
-      `${second}의 ${metric}은 얼마입니까?`,
-      `${first}의 ${metric} 추이는 어떻습니까?`,
+      `${first}의 ${contextKeyword}은 얼마입니까?`,
+      `${second}의 ${contextKeyword}은 얼마입니까?`,
+      `${first}와 ${second}의 ${contextKeyword}을 비교해줘`,
     ];
   }
 
@@ -596,6 +657,13 @@ function buildAlternativeQuestions(question) {
         `${company}의 자본총계와 발행주식수를 확인해줘`,
       ];
     }
+    if (contextKeyword !== metric) {
+      return [
+        `${company}의 ${contextKeyword}은 얼마입니까?`,
+        `${company}의 ${metric}과 ${contextKeyword}을 함께 분석해줘`,
+        `${company}의 최근 ${contextKeyword} 추이를 그래프로 보여줘`,
+      ];
+    }
     return [
       `${company}의 ${metric}은 얼마입니까?`,
       `${company}의 ${metric} 추이는 어떻습니까?`,
@@ -604,9 +672,9 @@ function buildAlternativeQuestions(question) {
   }
 
   return [
-    metric === "PBR" ? "PBR을 구하는 공식은 무엇입니까?" : `${metric}이 높은 기업을 알려줘`,
-    metric === "PBR" ? "PBR 계산에 필요한 주가와 BPS는 무엇입니까?" : `최근 5개년 ${metric} 추이를 분석해줘`,
-    `${metric}을 계산하는 데 필요한 재무제표 계정은 무엇입니까?`,
+    metric === "PBR" ? "PBR을 구하는 공식은 무엇입니까?" : `${contextKeyword}이 높은 기업을 알려줘`,
+    metric === "PBR" ? "PBR 계산에 필요한 주가와 BPS는 무엇입니까?" : `최근 5개년 ${contextKeyword} 추이를 분석해줘`,
+    `${contextKeyword}을 계산하는 데 필요한 재무제표 계정은 무엇입니까?`,
   ];
 }
 
@@ -650,7 +718,21 @@ function extractMetric(question) {
     ["유동비율", ["유동비율"]],
   ];
   const match = rules.find(([, tokens]) => tokens.some((token) => compact.includes(token.toLowerCase())));
-  return match ? match[0] : "재무지표";
+  return match ? match[0] : "주요 재무계정";
+}
+
+function extractContextKeyword(question, metric) {
+  const compact = question.replace(/\s+/g, "").toLowerCase();
+  const contextRules = [
+    ["차입과 유동비율", ["차입", "차입금", "상환"]],
+    ["유동자산과 유동부채", ["유동자산", "유동부채"]],
+    ["부채와 유동비율", ["부채", "안정성"]],
+    ["매출원가율과 판관비율", ["원가", "판관비", "판매비와관리비"]],
+    ["주가와 PBR", ["pbr", "주가순자산"]],
+    ["주가 흐름", ["주가", "종가"]],
+  ];
+  const match = contextRules.find(([, tokens]) => tokens.some((token) => compact.includes(token.toLowerCase())));
+  return match ? match[0] : metric;
 }
 
 function formatAnswerText(text) {
@@ -798,6 +880,9 @@ function LineChart({ chart }) {
   const allPoints = chart.datasets.flatMap((dataset) => dataset.points);
   const xValues = allPoints.map((point) => point.x);
   const yValues = allPoints.map((point) => point.y);
+  const pointRadius = allPoints.length >= 100 ? 1.8 : 3.4;
+  const forecastRadius = allPoints.length >= 100 ? 2.6 : 4.5;
+  const maxMarkerRadius = allPoints.length >= 100 ? 3.2 : 5.2;
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
   const rawMinY = Math.min(...yValues);
@@ -812,6 +897,7 @@ function LineChart({ chart }) {
     ? [minY, axisBreak.lowerEnd, axisBreak.upperStart, maxY]
     : [0, 0.5, 1].map((ratio) => minY + yRange * ratio);
   const xTicks = buildXTicks(allPoints);
+  const maxMarkers = buildMaxPointMarkers(chart.datasets, rawMaxY);
 
   const scaleX = (value) => padding.left + ((value - minX) / xRange) * (width - padding.left - padding.right);
   const scaleY = (value) => {
@@ -850,11 +936,28 @@ function LineChart({ chart }) {
                   className={point.forecast ? "forecast-point" : undefined}
                   cx={scaleX(point.x)}
                   cy={scaleY(point.y)}
-                  r={point.forecast ? "4.5" : "3.4"}
+                  r={point.forecast ? forecastRadius : pointRadius}
                 >
                   <title>{`${dataset.label} ${point.label}: ${point.display}`}</title>
                 </circle>
               ))}
+            </g>
+          );
+        })}
+        {maxMarkers.map((marker) => {
+          const x = scaleX(marker.point.x);
+          const y = scaleY(marker.point.y);
+          const labelY = y < padding.top + 18 ? y + 18 : y - 10;
+          const textAnchor = x > width - padding.right - 52 ? "end" : x < padding.left + 52 ? "start" : "middle";
+          const textX = textAnchor === "end" ? x - 8 : textAnchor === "start" ? x + 8 : x;
+          return (
+            <g key={`${marker.datasetKey}-${marker.point.x}-max`} className="max-point-marker">
+              <circle cx={x} cy={y} r={maxMarkerRadius}>
+                <title>{`최댓값 ${marker.datasetLabel} ${marker.point.label}: ${marker.point.display}`}</title>
+              </circle>
+              <text x={textX} y={labelY} textAnchor={textAnchor}>
+                최댓값 {marker.point.display}
+              </text>
             </g>
           );
         })}
@@ -872,6 +975,22 @@ function LineChart({ chart }) {
       </div>
     </div>
   );
+}
+
+function buildMaxPointMarkers(datasets, rawMaxY) {
+  const markers = [];
+  datasets.forEach((dataset) => {
+    dataset.points.forEach((point) => {
+      if (point.y === rawMaxY) {
+        markers.push({
+          datasetKey: dataset.key,
+          datasetLabel: dataset.label,
+          point,
+        });
+      }
+    });
+  });
+  return markers.slice(0, 3);
 }
 
 function buildAxisBreak(values, minY, maxY, padding, height) {
@@ -948,6 +1067,7 @@ function buildXTicks(points) {
 function formatChartValue(value, unit) {
   if (unit === "PERCENT") return `${value.toFixed(1)}%`;
   if (unit === "KRW_PRICE") return `${Math.round(value).toLocaleString("ko-KR")}원`;
+  if (unit === "MULTIPLE") return `${value.toFixed(1)}배`;
   const abs = Math.abs(value);
   if (abs >= 1_0000_0000_0000) return `${(value / 1_0000_0000_0000).toFixed(0)}조`;
   if (abs >= 1_0000_0000) return `${(value / 1_0000_0000).toFixed(0)}억`;

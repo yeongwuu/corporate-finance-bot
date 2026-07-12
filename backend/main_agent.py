@@ -305,6 +305,9 @@ def select_tool(question: str) -> str:
             word in normalized
             for word in [
                 "재무제표",
+                "재무지표",
+                "주요재무지표",
+                "주요 재무지표",
                 "주요계정",
                 "주요 계정",
                 "기업 분석",

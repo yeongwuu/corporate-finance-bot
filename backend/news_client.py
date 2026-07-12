@@ -23,6 +23,7 @@ class NewsItem:
     description: str
     link: str
     pub_date: str
+    image_url: str | None = None
 
 
 class NewsClient:
@@ -57,6 +58,7 @@ class NewsClient:
                     "",
                     f"- published: {item.pub_date}",
                     f"- source_url: {item.link}",
+                    *([f"- image_url: {item.image_url}"] if item.image_url else []),
                     "",
                     item.description,
                     "",
@@ -89,6 +91,7 @@ class NewsClient:
                 description=_clean_html(item.get("description", "")),
                 link=item.get("originallink") or item.get("link", ""),
                 pub_date=item.get("pubDate", ""),
+                image_url=_fetch_open_graph_image(item.get("originallink") or item.get("link", "")),
             )
             for item in data.get("items", [])
         ]
@@ -115,6 +118,36 @@ def get_env(name: str) -> str | None:
 def _clean_html(value: str) -> str:
     value = re.sub(r"<[^>]+>", "", value)
     return html.unescape(value).strip()
+
+
+def _fetch_open_graph_image(url: str) -> str | None:
+    if not url:
+        return None
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 corporate-finance-bot/0.1"},
+        )
+        with urllib.request.urlopen(request, timeout=4, context=_ssl_context()) as response:
+            content_type = response.headers.get("Content-Type", "")
+            if "text/html" not in content_type.lower():
+                return None
+            html_text = response.read(300_000).decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    patterns = [
+        r'<meta\s+[^>]*(?:property|name)=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
+        r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']og:image["\']',
+        r'<meta\s+[^>]*(?:property|name)=["\']twitter:image["\'][^>]*content=["\']([^"\']+)["\']',
+        r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']twitter:image["\']',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html_text, flags=re.IGNORECASE)
+        if match:
+            image_url = html.unescape(match.group(1)).strip()
+            return urllib.parse.urljoin(url, image_url)
+    return None
 
 
 def _safe_filename(value: str) -> str:
