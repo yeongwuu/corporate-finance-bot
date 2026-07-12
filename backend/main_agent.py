@@ -273,6 +273,9 @@ def select_tool(question: str) -> str:
     if _is_stock_price_question(normalized):
         return "stock_price_tool"
 
+    if _is_representative_company_analysis_question(normalized):
+        return "company_trend_tool"
+
     if _is_industry_rank_question(normalized):
         return "industry_rank_tool"
 
@@ -642,12 +645,22 @@ def _is_industry_rank_question(normalized: str) -> bool:
         "무슨산업",
         "어떤산업",
         "어느산업",
+        "대표기업",
+        "대표회사",
+        "대표종목",
     ]
     if any(term in compact for term in direct_terms):
         return True
     rank_terms = ["상위", "top", "순위", "랭킹", "랭크"]
     group_terms = ["산업", "업종", "섹터", "기업", "회사", "산업군"]
     return any(term in normalized for term in rank_terms) and any(term in normalized for term in group_terms)
+
+
+def _is_representative_company_analysis_question(normalized: str) -> bool:
+    compact = normalized.replace(" ", "")
+    representative_terms = ["대표기업", "대표회사", "대표종목"]
+    analysis_terms = ["비교", "분석", "추이", "성장률", "상승률", "cagr", "매출", "영업이익", "순이익"]
+    return any(term in compact for term in representative_terms) and any(term in compact for term in analysis_terms)
 
 
 def _is_company_financial_comparison_question(normalized: str) -> bool:

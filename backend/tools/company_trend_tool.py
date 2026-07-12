@@ -5,11 +5,12 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
-from company_data.financial_store import FinancialStatementStore
+from company_data.financial_store import CompanyMatch, FinancialStatementStore
 from dart_client import DartClient, load_dart_api_key
 from news_client import NewsClient, get_env as get_news_env
 from rag.external_rag import search_external_docs
 from tools.company_analysis_tool import _format_amount, _format_ratio, _map_dart_accounts
+from tools.industry_rank_tool import select_representative_companies
 
 
 ACCOUNT_LABELS = {
@@ -73,6 +74,8 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     store = FinancialStatementStore()
     news_requested = _should_fetch_news(question)
     try:
+        if _asks_representative_industry_analysis(question):
+            return _analyze_representative_industry_growth_comparison(question, store)
         comparison_companies = _resolve_comparison_companies(store, question) if _is_company_comparison_question(question) else []
         if _asks_industry_peer_growth_comparison(question) and len(comparison_companies) >= 1:
             return _analyze_industry_peer_growth_comparison(question, store, comparison_companies[0])
@@ -496,6 +499,13 @@ def _asks_industry_peer_growth_comparison(question: str) -> bool:
     )
 
 
+def _asks_representative_industry_analysis(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    representative_terms = ["대표기업", "대표회사", "대표종목"]
+    analysis_terms = ["비교", "분석", "추이", "성장률", "상승률", "cagr", "매출", "영업이익", "순이익"]
+    return any(term in compact for term in representative_terms) and any(term in compact for term in analysis_terms)
+
+
 def _is_company_comparison_question(question: str) -> bool:
     compact = question.replace(" ", "").lower()
     return any(token in compact for token in ["비교", "vs", "대비"]) and not any(
@@ -589,6 +599,67 @@ def _analyze_industry_peer_growth_comparison(
     }
 
 
+def _analyze_representative_industry_growth_comparison(question: str, store: FinancialStatementStore) -> dict[str, Any]:
+    industry = _extract_peer_industry(question, None)
+    representative_rows = select_representative_companies(store, industry, limit=5)
+    companies = [
+        CompanyMatch(
+            stock_code=row["stock_code"],
+            company_name=row["company_name"],
+            market=row["market"],
+            industry_name=row["industry_name"],
+            latest_year=int(row["fiscal_year"]),
+        )
+        for row in representative_rows
+    ]
+    summaries = _build_revenue_growth_summaries(question, store, companies, include_missing=True)
+    for index, item in enumerate(summaries, start=1):
+        item["rank"] = index
+
+    if not summaries:
+        return {
+            "status": "no_data",
+            "summary": f"{industry} 대표 기업의 매출 성장률 비교 데이터를 찾지 못했습니다.",
+            "steps": ["대표기업 선정 후 각 기업의 시작연도와 종료연도 매출액을 확인해야 합니다."],
+            "industry": industry,
+        }
+
+    latest_year = max(row["fiscal_year"] for row in representative_rows) if representative_rows else "-"
+    selection_note = (
+        f"대표 기업은 엑셀 기준 {industry} 후보군에서 {latest_year}년 매출 상위 5개사로 선정하되, "
+        "삼성전자·SK하이닉스처럼 주요 반도체 기업은 후보군에 포함했습니다."
+    )
+    steps = [
+        selection_note,
+        "분석 기준: 선정된 대표 기업의 가용 최근 5개년 매출액 누적 성장률과 CAGR",
+    ]
+    for item in summaries:
+        if not item.get("metrics"):
+            steps.append(
+                f"{item['rank']}. {item['company']['company_name']}: "
+                f"{item.get('missing_reason') or '매출액 데이터 부족으로 계산 보류'}"
+            )
+            continue
+        metric = item["metrics"][0]
+        steps.append(
+            f"{item['rank']}. {item['company']['company_name']}: "
+            f"{metric['start_year']}년 {_format_amount(metric['start_amount'])} -> "
+            f"{metric['end_year']}년 {_format_amount(metric['end_amount'])}, "
+            f"누적 {_format_ratio(metric['growth'])}, CAGR {_format_ratio(metric['cagr']) if metric.get('cagr') is not None else '-'}"
+        )
+
+    return {
+        "status": "ok",
+        "mode": "industry_growth_comparison",
+        "summary": f"{industry} 대표 기업 {len(summaries)}개사의 매출상승률을 비교했습니다.",
+        "steps": steps,
+        "industry": industry,
+        "selection_note": selection_note,
+        "comparison": summaries,
+        "chart_metric": "cagr",
+    }
+
+
 def _analyze_market_comparison(question: str, store: FinancialStatementStore, companies: list[Any]) -> dict[str, Any]:
     company_summaries = []
     news_results = []
@@ -667,6 +738,60 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
     }
 
 
+def _build_revenue_growth_summaries(
+    question: str, store: FinancialStatementStore, companies: list[Any], include_missing: bool = False
+) -> list[dict[str, Any]]:
+    summaries = []
+    for company in companies:
+        available_years = store.available_years(company.stock_code)
+        if not available_years:
+            continue
+        period = _extract_period(question, available_years)
+        series = store.get_account_series(company.stock_code, ["revenue"], period.start_year, period.end_year)
+        metrics = _build_metric_summary(series, ["revenue"])
+        revenue_metric = _find_metric(metrics, "revenue")
+        if not revenue_metric:
+            dart_series = _try_build_dart_revenue_series(company, period.start_year, period.end_year)
+            if dart_series:
+                series = dart_series
+                metrics = _build_metric_summary(series, ["revenue"])
+                revenue_metric = _find_metric(metrics, "revenue")
+        if not revenue_metric or revenue_metric.get("growth") is None:
+            if include_missing:
+                summaries.append(
+                    {
+                        "company": company.__dict__,
+                        "period": period.__dict__,
+                        "series": series,
+                        "metrics": [],
+                        "growth": None,
+                        "cagr": None,
+                        "missing_reason": "엑셀 손익계산서 매출액 데이터가 없어 계산을 보류했습니다.",
+                    }
+                )
+            continue
+        summaries.append(
+            {
+                "company": company.__dict__,
+                "period": period.__dict__,
+                "series": series,
+                "metrics": [revenue_metric],
+                "growth": revenue_metric.get("growth"),
+                "cagr": revenue_metric.get("cagr"),
+                "start_amount": revenue_metric.get("start_amount"),
+                "end_amount": revenue_metric.get("end_amount"),
+            }
+        )
+    summaries.sort(
+        key=lambda item: (
+            item.get("cagr") if item.get("cagr") is not None else float("-inf"),
+            item.get("growth") if item.get("growth") is not None else float("-inf"),
+        ),
+        reverse=True,
+    )
+    return summaries
+
+
 def _extract_peer_industry(question: str, base_company: Any) -> str:
     compact = question.replace(" ", "")
     if "반도체" in compact:
@@ -736,6 +861,28 @@ def _peer_industry_keywords(industry: str) -> list[str]:
     if industry == "방산":
         return ["방산", "방위", "항공", "무기", "탄약"]
     return [industry]
+
+
+def _try_build_dart_revenue_series(company: Any, start_year: int, end_year: int) -> list[dict[str, Any]]:
+    if not load_dart_api_key():
+        return []
+    rows = []
+    for fiscal_year in range(start_year, end_year + 1):
+        try:
+            result = DartClient().fetch_financial_accounts(
+                stock_code=getattr(company, "stock_code", None),
+                corp_name=getattr(company, "company_name", None),
+                fiscal_year=fiscal_year,
+            )
+        except Exception:
+            continue
+        if result.get("status") != "ok":
+            continue
+        accounts = _map_dart_accounts(result.get("accounts") or [])
+        revenue = accounts.get("revenue")
+        if revenue and revenue.get("amount") is not None:
+            rows.append({"year": fiscal_year, "revenue": revenue | {"source": "dart"}})
+    return rows
 
 
 def _clip_period(start_year: int, end_year: int, available_years: list[int], source: str) -> Period:

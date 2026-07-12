@@ -23,7 +23,6 @@ export default function ChatUI() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStartedAt, setLoadingStartedAt] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [lastResult, setLastResult] = useState(null);
   const [pendingFeedback, setPendingFeedback] = useState(null);
   const [feedbackNotice, setFeedbackNotice] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
@@ -101,7 +100,6 @@ export default function ChatUI() {
       }
 
       const answer = data.answer || "답변을 생성하지 못했습니다.";
-      setLastResult(data);
       setMessages([
         ...nextMessages,
         {
@@ -136,7 +134,6 @@ export default function ChatUI() {
           : error.message === "Failed to fetch"
             ? "백엔드 서버에 연결하지 못했습니다."
             : error.message;
-      setLastResult(null);
       setMessages([
         ...nextMessages,
         {
@@ -274,7 +271,13 @@ export default function ChatUI() {
             accept=".txt,.md,.csv,.json,.pdf,image/*"
             onChange={(event) => setAttachedFile(event.target.files?.[0] || null)}
           />
-          <button type="button" className="attach-button" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+          <button
+            type="button"
+            className="attach-button"
+            data-tooltip="문제를 업로드하세요!"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading}
+          >
             파일
           </button>
           <button
@@ -288,38 +291,6 @@ export default function ChatUI() {
         </form>
       </section>
 
-      <aside className="inspector">
-        <h2>응답 정보</h2>
-        <dl>
-          <div>
-            <dt>도구</dt>
-            <dd>{lastResult?.tool || "-"}</dd>
-          </div>
-          <div>
-            <dt>상태</dt>
-            <dd>{lastResult?.calculation?.status || "-"}</dd>
-          </div>
-          <div>
-            <dt>근거</dt>
-            <dd>{lastResult?.references?.length ?? 0}</dd>
-          </div>
-          <div>
-            <dt>뉴스</dt>
-            <dd>{formatNewsStatus(lastResult?.calculation)}</dd>
-          </div>
-        </dl>
-
-        <ChartPanel chart={lastResult?.chart} />
-
-        <div className="reference-list">
-          {(lastResult?.references || []).slice(0, 4).map((reference, index) => (
-            <section key={`${reference.title}-${index}`}>
-              <strong>{reference.title}</strong>
-              <p>{reference.snippet}</p>
-            </section>
-          ))}
-        </div>
-      </aside>
       {feedbackNotice ? (
         <div className="feedback-toast" role="status">
           {feedbackNotice}
@@ -797,15 +768,6 @@ function MathFormula({ expression, displayMode }) {
   } catch {
     return <code className="math-fallback">{expression}</code>;
   }
-}
-
-function formatNewsStatus(calculation) {
-  const newsFetch = calculation?.news_fetch;
-  const externalCount = calculation?.external_references?.length || 0;
-  if (newsFetch?.status === "ok") return `수집 ${newsFetch.count ?? externalCount}건`;
-  if (newsFetch?.status) return "미수집";
-  if (externalCount > 0) return `외부근거 ${externalCount}건`;
-  return "-";
 }
 
 function ChartPanel({ chart, compact = false }) {

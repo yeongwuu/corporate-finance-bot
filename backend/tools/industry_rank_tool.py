@@ -5,7 +5,9 @@ import sqlite3
 from typing import Any
 
 from company_data.financial_store import FinancialStatementStore
+from dart_client import DartClient, load_dart_api_key
 from tools.company_analysis_tool import _format_amount
+from tools.company_analysis_tool import _map_dart_accounts
 
 
 BIO_KEYWORDS = [
@@ -20,6 +22,27 @@ BIO_KEYWORDS = [
     "연구개발",
 ]
 
+SEMICONDUCTOR_KEYWORDS = [
+    "반도체",
+    "전자집적회로",
+    "다이오드",
+    "트랜지스터",
+    "메모리",
+    "웨이퍼",
+    "집적회로",
+]
+
+SEMICONDUCTOR_COMPANY_NAMES = [
+    "삼성전자",
+    "SK하이닉스",
+    "DB하이텍",
+    "LX세미콘",
+    "SK실트론",
+    "한미반도체",
+    "리노공업",
+    "원익IPS",
+]
+
 
 def rank_industry_companies(question: str) -> dict[str, Any]:
     store = FinancialStatementStore()
@@ -31,6 +54,9 @@ def rank_industry_companies(question: str) -> dict[str, Any]:
             "summary": "재무제표 데이터에서 산업별 기업 목록을 확인하지 못했습니다.",
             "steps": [str(exc)],
         }
+
+    if _asks_representative_companies(question):
+        return _representative_industry_companies(store, question)
 
     if _asks_industry_grouping(question):
         return _group_industry_companies(store, question)
@@ -59,6 +85,37 @@ def rank_industry_companies(question: str) -> dict[str, Any]:
             f"분류 기준: 회사명 또는 업종명에 {', '.join(_keywords_for_industry(industry))} 키워드가 포함된 기업",
             f"정렬 기준: {latest_year}년 매출액 내림차순",
             "상위 기업: " + " / ".join(lines),
+        ],
+        "industry": industry,
+        "ranking": rows,
+        "year": latest_year,
+    }
+
+
+def _representative_industry_companies(store: FinancialStatementStore, question: str) -> dict[str, Any]:
+    industry = _extract_industry(question)
+    rows = select_representative_companies(store, industry, limit=5)
+    if not rows:
+        return {
+            "status": "no_data",
+            "summary": f"{industry} 대표 기업을 선정할 재무 데이터를 찾지 못했습니다.",
+            "steps": ["업종명, 회사명 키워드, 최신연도 매출액을 함께 확인합니다."],
+            "industry": industry,
+        }
+
+    latest_year = max(row["fiscal_year"] for row in rows)
+    return {
+        "status": "ok",
+        "mode": "representative_companies",
+        "summary": f"{industry} 대표 기업은 최신연도 매출액 기준 상위 {len(rows)}개사로 선정했습니다.",
+        "steps": [
+            f"선정 방식: 업종명에 {industry} 관련 키워드가 포함된 기업과, 삼성전자처럼 업종명은 다르지만 반도체 사업을 영위하는 주요 기업을 후보군에 포함한 뒤 매출액이 확인되는 기업을 기준으로 정렬했습니다.",
+            f"정렬 기준: {latest_year}년 매출액 내림차순",
+            "선정 기업: "
+            + " / ".join(
+                f"{row['rank']}. {row['company_name']}({row['stock_code'] or '-'}) {_format_amount(row['revenue'])}"
+                for row in rows
+            ),
         ],
         "industry": industry,
         "ranking": rows,
@@ -194,13 +251,80 @@ def _query_keyword_industry_groups(store: FinancialStatementStore, industry: str
     return sorted(grouped.values(), key=lambda item: item["count"], reverse=True)
 
 
-def _query_ranked_companies(store: FinancialStatementStore, industry: str, limit: int) -> list[dict[str, Any]]:
+def select_representative_companies(store: FinancialStatementStore, industry: str, limit: int = 5) -> list[dict[str, Any]]:
+    rows = _query_ranked_companies(store, industry, max(limit, 12), include_representatives=True)
+    if industry == "반도체":
+        rows = _merge_required_semiconductor_companies(store, rows)
+    rows = sorted(rows, key=lambda row: row.get("revenue") or 0, reverse=True)
+    if industry == "반도체":
+        sk_hynix = next((row for row in rows if row.get("company_name") == "SK하이닉스"), None)
+        if sk_hynix and sk_hynix not in rows[:limit]:
+            selected = rows[: max(0, limit - 1)]
+            if all(row.get("company_name") != "SK하이닉스" for row in selected):
+                selected.append(sk_hynix)
+            rows = selected + [row for row in rows if row not in selected and row is not sk_hynix]
+    for index, row in enumerate(rows[:limit], start=1):
+        row["rank"] = index
+    return rows[:limit]
+
+
+def _merge_required_semiconductor_companies(store: FinancialStatementStore, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_name = {row["company_name"]: row for row in rows}
+    for name in ["삼성전자", "SK하이닉스"]:
+        if name in by_name:
+            continue
+        company = store.resolve_company(name)
+        if not company:
+            continue
+        latest_year = company.latest_year
+        revenue = _dart_revenue(company.stock_code, company.company_name, latest_year)
+        by_name[name] = {
+            "rank": 0,
+            "fiscal_year": latest_year,
+            "stock_code": company.stock_code,
+            "company_name": company.company_name,
+            "market": company.market,
+            "industry_name": company.industry_name,
+            "revenue": revenue or 0.0,
+            "revenue_display": _format_amount(revenue) if revenue else "보완 필요",
+            "revenue_source": "dart" if revenue else "missing",
+        }
+    return list(by_name.values())
+
+
+def _dart_revenue(stock_code: str | None, company_name: str | None, fiscal_year: int) -> float | None:
+    if not load_dart_api_key():
+        return None
+    try:
+        result = DartClient().fetch_financial_accounts(
+            stock_code=stock_code,
+            corp_name=company_name,
+            fiscal_year=fiscal_year,
+        )
+    except Exception:
+        return None
+    if result.get("status") != "ok":
+        return None
+    accounts = _map_dart_accounts(result.get("accounts") or [])
+    revenue = accounts.get("revenue")
+    if not revenue:
+        return None
+    return revenue.get("amount")
+
+
+def _query_ranked_companies(
+    store: FinancialStatementStore, industry: str, limit: int, include_representatives: bool = False
+) -> list[dict[str, Any]]:
     keywords = _keywords_for_industry(industry)
     where_parts = []
     params: list[Any] = []
     for keyword in keywords:
         where_parts.append("(company_name LIKE ? OR industry_name LIKE ?)")
         params.extend([f"%{keyword}%", f"%{keyword}%"])
+    if include_representatives and industry == "반도체":
+        placeholders = ", ".join("?" for _ in SEMICONDUCTOR_COMPANY_NAMES)
+        where_parts.append(f"company_name IN ({placeholders})")
+        params.extend(SEMICONDUCTOR_COMPANY_NAMES)
 
     query = f"""
         WITH latest AS (
@@ -273,6 +397,8 @@ def _company_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _extract_industry(question: str) -> str:
+    if "반도체" in question:
+        return "반도체"
     if "바이오" in question:
         return "바이오"
     if any(term in question for term in ["방산", "방위산업", "국방", "항공우주", "우주항공"]):
@@ -309,9 +435,16 @@ def _asks_industry_grouping(question: str) -> bool:
     )
 
 
+def _asks_representative_companies(question: str) -> bool:
+    compact = question.replace(" ", "")
+    return any(token in compact for token in ["대표기업", "대표회사", "대표종목"])
+
+
 def _keywords_for_industry(industry: str) -> list[str]:
     if industry == "바이오":
         return BIO_KEYWORDS
+    if industry == "반도체":
+        return SEMICONDUCTOR_KEYWORDS
     if industry == "방산":
         return ["방산", "방위", "국방", "항공", "우주", "무기", "탄약", "군수"]
     return [industry]

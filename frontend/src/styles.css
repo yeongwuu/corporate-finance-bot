@@ -38,7 +38,7 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(190px, 260px) minmax(0, 1fr);
   min-height: 100vh;
   background:
     linear-gradient(90deg, rgba(208, 74, 2, 0.05) 1px, transparent 1px),
@@ -47,24 +47,12 @@ button {
   background-size: 32px 32px;
 }
 
-.sidebar,
-.inspector {
-  padding: 28px 22px;
-  background: rgba(255, 255, 255, 0.82);
-  border-color: var(--border);
-  border-style: solid;
-}
-
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  border-width: 0 1px 0 0;
-}
-
-.inspector {
-  border-width: 0 0 0 1px;
-  overflow-y: auto;
+  padding: 32px 12px 28px 28px;
+  background: linear-gradient(90deg, rgba(255, 242, 232, 0.78), rgba(255, 242, 232, 0));
 }
 
 .eyebrow {
@@ -92,28 +80,13 @@ h2 {
   font-size: 16px;
 }
 
-.inspector dl div {
-  display: grid;
-  gap: 5px;
-}
-
-.inspector dt {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.inspector dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 13px;
-}
-
 .chat-panel {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
-  padding: 28px;
+  max-width: 1040px;
+  width: 100%;
+  padding: 28px 34px 28px 18px;
   gap: 16px;
 }
 
@@ -467,6 +440,7 @@ h2 {
 }
 
 .composer button {
+  position: relative;
   min-height: 44px;
   align-self: end;
   border: 0;
@@ -474,6 +448,35 @@ h2 {
   background: var(--accent);
   color: #ffffff;
   font-weight: 700;
+}
+
+.attach-button::after {
+  position: absolute;
+  right: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  width: max-content;
+  max-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(74, 47, 32, 0.14);
+  color: #4a2f20;
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(50%) translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.attach-button:hover::after,
+.attach-button:focus-visible::after {
+  opacity: 1;
+  transform: translateX(50%) translateY(0);
 }
 
 .composer button:hover:not(:disabled) {
@@ -491,12 +494,6 @@ h2 {
 
 .composer .cancel-button:hover {
   background: #8f2f24;
-}
-
-.inspector dl {
-  display: grid;
-  gap: 14px;
-  margin: 18px 0 24px;
 }
 
 .chart-card {
@@ -834,10 +831,6 @@ h2 {
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 220px minmax(0, 1fr);
-  }
-
-  .inspector {
-    display: none;
   }
 }
 

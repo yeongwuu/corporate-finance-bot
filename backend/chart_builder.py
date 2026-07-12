@@ -178,10 +178,15 @@ def _build_industry_growth_comparison_chart(calculation: dict[str, Any]) -> dict
 
     base = calculation.get("company") or {}
     industry = calculation.get("industry") or "동종 업종"
+    subtitle = (
+        f"{base.get('company_name')} 포함, CAGR 기준"
+        if base.get("company_name")
+        else f"대표 기업 {len(bars)}개, CAGR 기준"
+    )
     return {
         "type": "bar",
         "title": f"{industry} 매출상승률 비교",
-        "subtitle": f"{base.get('company_name', '기준 기업')} 포함, CAGR 기준",
+        "subtitle": subtitle,
         "unit": "PERCENT",
         "bars": bars,
     }

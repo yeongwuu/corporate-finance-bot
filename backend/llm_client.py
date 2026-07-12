@@ -240,12 +240,18 @@ def build_industry_growth_comparison_answer(calculation: dict) -> str:
         )
     else:
         lines.append(calculation.get("summary") or f"{industry} 기업들의 매출상승률을 비교했습니다.")
+    if calculation.get("selection_note"):
+        lines.append(calculation["selection_note"])
 
     lines.append("매출상승률 상위 기업은 다음과 같습니다.")
     for item in comparison[:7]:
-        metric = (item.get("metrics") or [{}])[0]
         name = (item.get("company") or {}).get("company_name", "-")
         marker = " (기준 기업)" if item.get("is_base") else ""
+        metrics = item.get("metrics") or []
+        if not metrics:
+            lines.append(f"{item.get('rank')}. {name}{marker}: {item.get('missing_reason') or '매출액 데이터 부족으로 계산 보류'}")
+            continue
+        metric = metrics[0]
         lines.append(
             f"{item.get('rank')}. {name}{marker}: "
             f"누적 {_format_display_percent(metric.get('growth'))}, "
@@ -318,6 +324,8 @@ def _format_display_ratio(value: float) -> str:
 
 
 def build_industry_rank_answer(calculation: dict) -> str:
+    if calculation.get("mode") == "representative_companies":
+        return build_representative_companies_answer(calculation)
     if calculation.get("mode") == "industry_group":
         return build_industry_group_answer(calculation)
 
@@ -334,6 +342,26 @@ def build_industry_rank_answer(calculation: dict) -> str:
             f"매출액 {row['revenue_display']}, 업종 {row.get('industry_name') or '-'}"
         )
     lines.append("분류는 회사명 또는 업종명 키워드 기준이므로, 공식 산업 분류와는 차이가 있을 수 있습니다.")
+    return "\n".join(lines)
+
+
+def build_representative_companies_answer(calculation: dict) -> str:
+    industry = calculation.get("industry") or "산업"
+    ranking = calculation.get("ranking") or []
+    year = calculation.get("year") or "-"
+    if not ranking:
+        return calculation.get("summary") or f"{industry} 대표 기업을 찾지 못했습니다."
+
+    lines = [
+        f"{industry} 대표 기업은 {year}년 매출 상위 기업과 주요 반도체 기업을 함께 반영해 {len(ranking)}개사로 선정했습니다.",
+        f"선정 기준은 엑셀 기준 {industry} 후보군에서 매출 상위 기업을 고르되, 삼성전자·SK하이닉스처럼 주요 반도체 기업은 후보군에 포함하는 방식입니다.",
+    ]
+    for row in ranking:
+        lines.append(
+            f"{row['rank']}. {row['company_name']}({row.get('stock_code') or '-'}): "
+            f"매출액 {row['revenue_display']}, 업종 {row.get('industry_name') or '-'}"
+        )
+    lines.append("이후 반도체 대표 기업 분석이 필요한 질문은 위 선정 기업을 기준으로 비교합니다.")
     return "\n".join(lines)
 
 
