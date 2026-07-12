@@ -10,7 +10,7 @@ from dart_client import DartClient, load_dart_api_key
 from news_client import NewsClient, get_env as get_news_env
 from rag.external_rag import search_external_docs
 from tools.company_analysis_tool import _format_amount, _format_ratio, _map_dart_accounts
-from tools.industry_rank_tool import select_representative_companies
+from tools.industry_rank_tool import select_representative_companies, _major_industry
 
 
 ACCOUNT_LABELS = {
@@ -90,6 +90,41 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
             "steps": [str(exc)],
         }
     if not company:
+        # Check if it is an industry trend query
+        industry = _extract_peer_industry(question, None)
+        if industry and industry != "산업":
+            news_fetch_result = None
+            documents = []
+            if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+                query = f"{industry} 산업 동향"
+                try:
+                    news_fetch_result = NewsClient().save_news_for_rag(query, company_name=None, display=10)
+                    news_fetch_result["query"] = query
+                    if news_fetch_result.get("status") == "ok":
+                        documents = _news_documents_only(search_external_docs(query, None, limit=10))[:5]
+                except Exception as exc:
+                    news_fetch_result = {"status": "error", "message": f"뉴스 API 호출 실패: {exc}"}
+            else:
+                news_fetch_result = {
+                    "status": "missing_config",
+                    "message": "산업 동향 확인에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+                }
+
+            if documents:
+                steps = [
+                    f"뉴스 검색 대상: {industry} 산업 동향",
+                    "해당 산업의 최신 동향 관련 뉴스 근거를 확인했습니다.",
+                    "뉴스에서 확인되는 내용: " + " | ".join(f"{doc['title']}: {doc['snippet']}" for doc in documents[:3])
+                ]
+                return {
+                    "status": "latest_news",
+                    "summary": f"{industry} 산업의 최근 동향 관련 뉴스 근거를 확인했습니다.",
+                    "steps": steps,
+                    "industry": industry,
+                    "external_references": documents,
+                    "news_fetch": news_fetch_result,
+                }
+
         return {
             "status": "needs_company",
             "summary": "회사명 또는 6자리 종목코드를 찾지 못했습니다.",
@@ -331,9 +366,18 @@ def _try_fetch_latest_quarter_news(company: Any, question: str) -> dict[str, Any
 
 def _news_query(company_name: str | None, question: str) -> str:
     question = _normalize_short_year(question)
-    if company_name and company_name in question:
-        return question.strip()
-    return f"{company_name or ''} {question}".strip()
+    cleaned = question
+    # Remove postpositions and particles (의, 을, 를, 이, 가, 은, 는, 에, 에 대한 등)
+    cleaned = re.sub(r"(?:의|을|를|이|가|은|는|에|에\s*대한|에\s*대해|관한|관해)\s+", " ", cleaned)
+    # Remove common conversational verbs and polite endings (알려줘, 설명해줘, 분석해줘 등)
+    cleaned = re.sub(r"(?:알려줘|알려줘요|알려주세요|설명해줘|설명해줘요|설명해주세요|분석해줘|분석해줘요|분석해주세요|알려|설명|분석|요구|요청|제공)\b.*", "", cleaned)
+    # Remove punctuation
+    cleaned = re.sub(r"[?.,!]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if company_name and company_name not in cleaned:
+        cleaned = f"{company_name} {cleaned}"
+    return cleaned
 
 
 def _latest_quarter_news_query(company_name: str | None, question: str) -> str:
@@ -799,7 +843,20 @@ def _extract_peer_industry(question: str, base_company: Any) -> str:
     match = re.search(r"([가-힣A-Za-z0-9]+)\s*(?:기업들|업종|산업|섹터)", question)
     if match:
         return match.group(1)
-    return _major_industry(getattr(base_company, "industry_name", "") or getattr(base_company, "company_name", ""))
+    if base_company:
+        return _major_industry(getattr(base_company, "industry_name", "") or getattr(base_company, "company_name", ""))
+
+    # Fallback to cleaning the question and grabbing the core noun
+    cleaned = question
+    cleaned = re.sub(r"(?:의|을|를|이|가|은|는|에|에\s*대한|에\s*대해)\s+", " ", cleaned)
+    cleaned = re.sub(r"(?:대표기업|대표회사|대표종목|대표|상위|관련|기업들|기업|회사|종목|알려줘|알려|알려주세요|알려줘요|알려주라|추천|추천해줘|분석|분석해줘|알아봐)\b.*", "", cleaned)
+    cleaned = re.sub(r"[?.,!]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if len(cleaned) >= 2:
+        return cleaned
+
+    return "산업"
 
 
 def _query_peer_companies(

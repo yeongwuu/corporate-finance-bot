@@ -278,9 +278,18 @@ def _try_fetch_company_news(company: dict[str, Any], question: str) -> dict[str,
 
 
 def _news_query(company_name: str | None, question: str) -> str:
-    if company_name and company_name in question:
-        return question.strip()
-    return f"{company_name or ''} {question}".strip()
+    cleaned = question
+    # Remove postpositions and particles (의, 을, 를, 이, 가, 은, 는, 에, 에 대한 등)
+    cleaned = re.sub(r"(?:의|을|를|이|가|은|는|에|에\s*대한|에\s*대해|관한|관해)\s+", " ", cleaned)
+    # Remove common conversational verbs and polite endings (알려줘, 설명해줘, 분석해줘 등)
+    cleaned = re.sub(r"(?:알려줘|알려줘요|알려주세요|설명해줘|설명해줘요|설명해주세요|분석해줘|분석해줘요|분석해주세요|알려|설명|분석|요구|요청|제공)\b.*", "", cleaned)
+    # Remove punctuation
+    cleaned = re.sub(r"[?.,!]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if company_name and company_name not in cleaned:
+        cleaned = f"{company_name} {cleaned}"
+    return cleaned
 
 
 def _news_documents_only(documents: list[dict]) -> list[dict]:

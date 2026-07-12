@@ -15,8 +15,18 @@ PROJECT_ROOT = BACKEND_ROOT.parent
 
 
 def build_final_answer(question: str, tool_name: str, calculation: dict, references: list[dict]) -> str:
+    if calculation.get("status") == "needs_company":
+        if "추이" in question or "5개년" in question or "개년" in question or "기간" in question:
+            return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주시면 최근 재무계정 추이를 분석해 드리겠습니다."
+        return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주시면 자세히 조회해 드리겠습니다."
+
     if calculation.get("status") == "latest_news":
-        return build_latest_news_answer(calculation)
+        # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
+        # and let LLM synthesize the news documents.
+        if not calculation.get("company") and calculation.get("industry"):
+            pass
+        else:
+            return build_latest_news_answer(calculation)
     if calculation.get("status") == "needs_latest_disclosure":
         return build_rule_based_answer(tool_name, calculation, [])
     if tool_name == "industry_rank_tool" and calculation.get("status") == "ok":
@@ -32,7 +42,7 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
     if tool_name == "stock_price_tool" and calculation.get("status") == "ok":
         return build_stock_price_answer(calculation)
     if tool_name == "company_analysis_tool" and calculation.get("status") == "ok":
-        return build_company_accounts_answer(calculation)
+        return build_company_accounts_answer(question, calculation)
 
     provider = normalize_provider(get_env("LLM_PROVIDER"))
     if provider == "openai":
@@ -142,40 +152,93 @@ def build_market_ratio_trend_answer(calculation: dict) -> str:
     ratio_keys = calculation.get("ratio_keys") or []
     company_name = company.get("company_name", "해당 기업")
     labels = ", ".join({"per": "PER", "pbr": "PBR", "psr": "PSR"}.get(key, key.upper()) for key in ratio_keys)
-    lines = [
-        f"{company_name}의 {period.get('start_year')}~{period.get('end_year')}년 {labels} 추이는 다음과 같습니다."
-    ]
+
+    start_year = period.get('start_year')
+    end_year = period.get('end_year')
+
+    if start_year == end_year:
+        lines = [
+            f"{company_name}의 {start_year}년 {labels} 결과는 다음과 같습니다."
+        ]
+    else:
+        lines = [
+            f"{company_name}의 {start_year}~{end_year}년 {labels} 추이는 다음과 같습니다."
+        ]
 
     for row in rows:
         values = ", ".join(f"{item['label']} {item['display']}배" for item in row.get("ratios", {}).values())
         if values:
             lines.append(f"{row['year']}년: {values}")
 
-    for ratio_key in ratio_keys:
-        values = [
-            {"year": row["year"], **row["ratios"][ratio_key]}
-            for row in rows
-            if ratio_key in row.get("ratios", {})
-        ]
-        if len(values) < 2:
-            continue
-        first, last = values[0], values[-1]
-        direction = "상승" if last["value"] > first["value"] else "하락" if last["value"] < first["value"] else "유지"
-        lines.append(
-            f"{last['label']}은 {first['year']}년 {first['display']}배에서 "
-            f"{last['year']}년 {last['display']}배로 {direction}했습니다."
-        )
+    if start_year != end_year:
+        for ratio_key in ratio_keys:
+            values = [
+                {"year": row["year"], **row["ratios"][ratio_key]}
+                for row in rows
+                if ratio_key in row.get("ratios", {})
+            ]
+            if len(values) < 2:
+                continue
+            first, last = values[0], values[-1]
+            direction = "상승" if last["value"] > first["value"] else "하락" if last["value"] < first["value"] else "유지"
+            lines.append(
+                f"{last['label']}은 {first['year']}년 {first['display']}배에서 "
+                f"{last['year']}년 {last['display']}배로 {direction}했습니다."
+            )
 
     lines.append("계산은 연도말 종가와 상장주식수로 시가총액을 추정한 뒤 재무제표의 순이익, 자본총계, 매출액과 결합했습니다.")
     return "\n".join(lines)
 
 
-def build_company_accounts_answer(calculation: dict) -> str:
+def build_company_accounts_answer(question: str, calculation: dict) -> str:
     company = calculation.get("company") or {}
     accounts = calculation.get("accounts") or {}
     ratios = calculation.get("ratios") or {}
     year = calculation.get("year")
     company_name = company.get("company_name", "해당 기업")
+
+    # Determine if specific account keywords are mentioned in the question
+    keywords = {
+        "revenue": ["매출", "매출액", "영업수익", "수익"],
+        "cost_of_sales": ["매출원가", "원가"],
+        "gross_profit": ["매출총이익", "총이익"],
+        "selling_admin_expenses": ["판매비", "관리비", "판관비"],
+        "operating_income": ["영업이익", "영업 손실", "영업손실"],
+        "net_income": ["당기순이익", "순이익", "당기순손실", "순손실"],
+        "total_assets": ["자산총계", "자산 총계", "자산"],
+        "current_assets": ["유동자산", "유동 자산"],
+        "current_liabilities": ["유동부채", "유동 부채"],
+        "total_liabilities": ["부채총계", "부채 총계", "부채"],
+        "total_equity": ["자본총계", "자본 총계", "자본합계", "자본"],
+        "operating_cash_flow": ["영업활동현금흐름", "영업현금흐름", "영업활동 현금흐름"],
+        "investing_cash_flow": ["투자활동현금흐름", "투자현금흐름", "투자활동 현금흐름"],
+        "financing_cash_flow": ["재무활동현금흐름", "재무현금흐름", "재무활동 현금흐름"],
+    }
+
+    ratio_keywords = {
+        "cost_of_sales_ratio": ["매출원가율", "원가율"],
+        "selling_admin_expense_ratio": ["판관비율", "판관비 비율"],
+        "operating_margin": ["매출액영업이익률", "영업이익률", "영업 이익률"],
+        "net_margin": ["매출액순이익률", "순이익률", "순 이익률"],
+        "debt_to_equity": ["부채비율", "부채 비율"],
+        "current_ratio": ["유동비율", "유동 비율"],
+        "cfo_to_net_income": ["영업현금흐름/순이익", "cfo/net income"],
+    }
+
+    matched_accounts = []
+    matched_ratios = []
+
+    question_lowered = question.lower()
+    for key, kw_list in keywords.items():
+        if any(kw in question_lowered for kw in kw_list):
+            matched_accounts.append(key)
+
+    for key, kw_list in ratio_keywords.items():
+        if any(kw in question_lowered for kw in kw_list):
+            matched_ratios.append(key)
+
+    is_filtered = bool(matched_accounts or matched_ratios)
+
     account_order = [
         "revenue",
         "cost_of_sales",
@@ -192,11 +255,20 @@ def build_company_accounts_answer(calculation: dict) -> str:
         "investing_cash_flow",
         "financing_cash_flow",
     ]
-    lines = [f"{company_name}의 {year}년 주요 계정은 다음과 같습니다."]
+
+    target_accounts = matched_accounts if is_filtered else account_order
+
+    lines = []
+    if is_filtered:
+        lines.append(f"{company_name}의 {year}년 조회하신 재무 항목 결과는 다음과 같습니다.")
+    else:
+        lines.append(f"{company_name}의 {year}년 주요 계정은 다음과 같습니다.")
+
     for key in account_order:
-        account = accounts.get(key)
-        if account:
-            lines.append(f"- {account['label']}: {_format_display_amount(account['amount'])}")
+        if key in target_accounts:
+            account = accounts.get(key)
+            if account:
+                lines.append(f"- {account['label']}: {_format_display_amount(account['amount'])}")
 
     ratio_lines = []
     ratio_labels = {
@@ -208,12 +280,20 @@ def build_company_accounts_answer(calculation: dict) -> str:
         "current_ratio": "유동비율",
         "cfo_to_net_income": "영업현금흐름/순이익",
     }
+
+    target_ratios = matched_ratios if is_filtered else list(ratio_labels.keys())
+
     for key, label in ratio_labels.items():
-        value = ratios.get(key)
-        if value is not None:
-            ratio_lines.append(f"{label} {_format_display_ratio(value)}")
+        if key in target_ratios:
+            value = ratios.get(key)
+            if value is not None:
+                ratio_lines.append(f"{label} {_format_display_ratio(value)}")
+
     if ratio_lines:
-        lines.append("주요 비율은 " + ", ".join(ratio_lines) + "입니다.")
+        if is_filtered:
+            lines.append("관련 재무 비율: " + ", ".join(ratio_lines))
+        else:
+            lines.append("주요 비율은 " + ", ".join(ratio_lines) + "입니다.")
 
     return "\n".join(lines)
 
@@ -389,16 +469,26 @@ def build_representative_companies_answer(calculation: dict) -> str:
     if not ranking:
         return calculation.get("summary") or f"{industry} 대표 기업을 찾지 못했습니다."
 
-    lines = [
-        f"{industry} 대표 기업은 {year}년 매출 상위 기업과 주요 반도체 기업을 함께 반영해 {len(ranking)}개사로 선정했습니다.",
-        f"선정 기준은 엑셀 기준 {industry} 후보군에서 매출 상위 기업을 고르되, 삼성전자·SK하이닉스처럼 주요 반도체 기업은 후보군에 포함하는 방식입니다.",
-    ]
+    lines = []
+    if industry == "반도체":
+        lines.extend([
+            f"{industry} 대표 기업은 {year}년 매출 상위 기업과 주요 반도체 기업을 함께 반영해 {len(ranking)}개사로 선정했습니다.",
+            f"선정 기준은 엑셀 기준 {industry} 후보군에서 매출 상위 기업을 고르되, 삼성전자·SK하이닉스처럼 주요 반도체 기업은 후보군에 포함하는 방식입니다.",
+        ])
+    else:
+        lines.append(f"{industry} 대표 기업은 {year}년 매출 상위 기준 {len(ranking)}개사로 선정했습니다.")
+
     for row in ranking:
         lines.append(
             f"{row['rank']}. {row['company_name']}({row.get('stock_code') or '-'}): "
             f"매출액 {row['revenue_display']}, 업종 {row.get('industry_name') or '-'}"
         )
-    lines.append("이후 반도체 대표 기업 분석이 필요한 질문은 위 선정 기업을 기준으로 비교합니다.")
+
+    if industry == "반도체":
+        lines.append("이후 반도체 대표 기업 분석이 필요한 질문은 위 선정 기업을 기준으로 비교합니다.")
+    else:
+        lines.append(f"이후 {industry} 대표 기업 분석이 필요한 질문은 위 선정 기업을 기준으로 비교합니다.")
+
     return "\n".join(lines)
 
 

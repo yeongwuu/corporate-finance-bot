@@ -37,7 +37,8 @@ def analyze_valuation(question: str) -> dict:
 
 def calculate_market_ratio_trend(question: str) -> dict[str, Any]:
     ratio_keys = _extract_market_ratio_keys(question)
-    if not ratio_keys or not _asks_ratio_trend(question):
+    has_specific_year = len(re.findall(r"20[0-3]\d", question)) >= 1
+    if not ratio_keys or (not _asks_ratio_trend(question) and not has_specific_year):
         return {"status": "no_calculation", "summary": "", "steps": []}
 
     store = FinancialStatementStore()

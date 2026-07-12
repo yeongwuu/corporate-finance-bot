@@ -403,6 +403,17 @@ def _extract_industry(question: str) -> str:
         return "바이오"
     if any(term in question for term in ["방산", "방위산업", "국방", "항공우주", "우주항공"]):
         return "방산"
+
+    # Clean conversational phrases and grab the core noun
+    cleaned = question
+    cleaned = re.sub(r"(?:의|을|를|이|가|은|는|에|에\s*대한|에\s*대해)\s+", " ", cleaned)
+    cleaned = re.sub(r"(?:대표기업|대표회사|대표종목|대표|상위|관련|기업들|기업|회사|종목|알려줘|알려|알려주세요|알려줘요|알려주라|추천|추천해줘|분석|분석해줘|알아봐)\b.*", "", cleaned)
+    cleaned = re.sub(r"[?.,!]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if len(cleaned) >= 2:
+        return cleaned
+
     match = re.search(r"([가-힣A-Za-z0-9]+)\s*(?:산업|업종|섹터)", question)
     return match.group(1) if match else "산업"
 

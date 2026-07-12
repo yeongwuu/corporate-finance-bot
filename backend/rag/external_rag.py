@@ -4,6 +4,9 @@ import re
 from pathlib import Path
 
 
+import email.utils
+from datetime import datetime
+
 EXTERNAL_DOCS_DIR = Path(__file__).resolve().parents[1] / "external_docs"
 BUSINESS_TERMS = [
     "매출",
@@ -29,6 +32,20 @@ BUSINESS_TERMS = [
 ]
 
 
+def parse_published_timestamp(published_str: str | None) -> float:
+    if not published_str:
+        return 0.0
+    try:
+        dt = email.utils.parsedate_to_datetime(published_str)
+        return dt.timestamp()
+    except Exception:
+        try:
+            dt = datetime.strptime(published_str.split()[0], "%Y-%m-%d")
+            return dt.timestamp()
+        except Exception:
+            return 0.0
+
+
 def search_external_docs(query: str, company_name: str | None = None, limit: int = 5) -> list[dict]:
     terms = tokenize(query)
     if company_name:
@@ -49,12 +66,25 @@ def search_external_docs(query: str, company_name: str | None = None, limit: int
             if score <= 0:
                 continue
             metadata = parse_metadata(chunk) or parse_metadata(text)
+            published_str = metadata.get("published")
+            pub_ts = parse_published_timestamp(published_str)
+
+            # Apply recency bonus to news articles
+            is_news = path.name.startswith("news_")
+            if is_news and pub_ts > 0:
+                # Calculate years since 2020-01-01 (1577836800)
+                # 1 year is approx 31536000 seconds. Add 5.0 bonus score points per year.
+                years_since_2020 = (pub_ts - 1577836800) / 31536000.0
+                if years_since_2020 > 0:
+                    score += int(years_since_2020 * 5.0)
+
             scored_chunks.append(
                 {
                     "title": path.stem,
                     "source": str(path),
                     "source_url": metadata.get("source_url"),
                     "image_url": metadata.get("image_url"),
+                    "published": published_str,
                     "score": score,
                     "chunk_index": chunk_index,
                     "snippet": make_snippet(chunk, terms),

@@ -158,20 +158,52 @@ def _calculation_description(calculation: dict) -> str:
 
 
 def _build_context_text(history: list[dict]) -> str:
+    if not history:
+        return ""
+
     lines = []
-    for item in history[-6:]:
+    fail_keywords = [
+        "단정하기 어렵습니다",
+        "찾지 못했습니다",
+        "제한됩니다",
+        "설정이 필요합니다",
+        "실패했습니다",
+        "에러",
+        "오류",
+        "부족합니다",
+        "수치를 확인할 수 없습니다",
+        "포함되어 있지 않습니다",
+    ]
+
+    # Iterate backward to detect recent failures and dilute older context
+    i = len(history) - 1
+    while i >= 0:
+        item = history[i]
         role = str(item.get("role", "")).strip().lower()
         content = str(item.get("content", "")).strip()
-        if role != "user" or not content:
-            continue
-        compact = " ".join(content.split())
-        lines.append(compact[:220])
+
+        if role == "assistant":
+            # If the assistant failed to answer the question, drop all previous context
+            if any(kw in content for kw in fail_keywords):
+                if "어떤 기업이 궁금하세요" not in content:
+                    break
+        elif role == "user":
+            if content:
+                lines.insert(0, " ".join(content.split())[:220])
+
+        i -= 1
+
     return "\n".join(lines)
 
 
 def _should_use_context(question: str) -> bool:
     normalized = question.lower().replace(" ", "")
     token_count = len(question.split())
+
+    # If the question is very short (e.g., just a company name), inherit the previous context.
+    if token_count <= 2:
+        return True
+
     independent_terms = [
         "상위",
         "top",
@@ -266,6 +298,14 @@ def _combined_references(calculation: dict, knowledge_references: list[dict]) ->
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    # Route industry trend and market outlook questions
+    if any(word in normalized for word in ["동향", "업황", "최근 동향", "최근동향", "산업동향", "산업 동향"]) and any(word in normalized for word in ["산업", "업종", "섹터", "분야", "시장"]):
+        return "company_trend_tool"
+
+    # Route general account trend questions (even if company name is missing initially)
+    if any(word in normalized for word in ["재무계정", "계정추이", "주요계정", "주요 계정", "계정"]) and any(word in normalized for word in ["추이", "분석", "흐름"]):
+        return "company_trend_tool"
 
     if _is_forecast_question(normalized):
         return "forecast_tool"
