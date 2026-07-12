@@ -51,6 +51,7 @@ export default function ChatUI() {
 
   const [recommendedQuestions, setRecommendedQuestions] = useState([]);
   const canSubmit = (input.trim().length > 0 || Boolean(attachedFile)) && !isLoading;
+  const isInitialState = messages.filter((m) => m.role === "user").length === 0;
 
   useEffect(() => {
     const fetchRecommendedQuestions = async () => {
