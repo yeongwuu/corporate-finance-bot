@@ -50,14 +50,14 @@ def answer_finance_question(
     trace.append(_trace_item("분석 도구 선택", tool_desc, step_started))
 
     if on_step:
-        on_step(1, f"분석 도구로 [{tool_desc}]을 준비하고 있습니다.")
+        on_step(1, "질문에 필요한 분석을 준비하고 있습니다.")
 
     step_started = time.perf_counter()
     knowledge_references = search_knowledge(effective_question)
     trace.append(_trace_item("재무 지식 검색", f"관련 기준 문서 {len(knowledge_references)}건을 확인했습니다.", step_started))
 
     if on_step:
-        on_step(2, f"[{tool_desc}]을 가동하여 재무 데이터를 추출하고 분석하는 중입니다.")
+        on_step(2, "재무 데이터를 추출하고 분석하고 있습니다.")
 
     step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)

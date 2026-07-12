@@ -258,11 +258,9 @@ export default function ChatUI() {
             trace: data.trace || [],
             suggestions: needsCompany
               ? buildExampleCompanies(data.calculation?.suggested_companies)
-              : serverSuggestions.length
-                ? serverSuggestions
-                : shouldShowAlternativeQuestions(answer, data)
-                  ? buildAlternativeQuestions(displayQuestion)
-                  : [],
+              : shouldShowAlternativeQuestions(answer, data)
+                ? (serverSuggestions.length ? serverSuggestions : buildAlternativeQuestions(displayQuestion))
+                : [],
             suggestionTitle: needsCompany ? "예시 기업들" : undefined,
             failureConsent: shouldAskFeedbackConsent(data, answer)
               ? {
@@ -407,9 +405,9 @@ export default function ChatUI() {
                   title="문제를 업로드하세요!"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
-                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
                 >
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
@@ -419,9 +417,9 @@ export default function ChatUI() {
                   disabled={!canSubmit}
                   data-tooltip="질문을 전송합니다!"
                   aria-label="질문 전송"
-                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
                 >
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
                     <line x1="22" y1="2" x2="11" y2="13" />
                     <polygon points="22 2 15 22 11 13 2 9 22 2" />
                   </svg>
@@ -504,7 +502,7 @@ export default function ChatUI() {
             title="문제를 업로드하세요!"
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', minHeight: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'end' }}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'end' }}
           >
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
@@ -517,7 +515,7 @@ export default function ChatUI() {
             onClick={isLoading ? cancelMessage : undefined}
             data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다!"}
             aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', minHeight: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#ff4d4f' : (canSubmit ? 'var(--accent)' : 'var(--border)'), alignSelf: 'end' }}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end' }}
           >
             {isLoading ? (
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1149,6 +1147,16 @@ function isDecorativeIconLine(line) {
 }
 
 function renderAnswerLine(line, key) {
+  const numberedStep = getNumberedStepMeta(line);
+  if (numberedStep) {
+    return (
+      <p className="answer-step-heading" key={key}>
+        <strong>
+          <span>{numberedStep.number}.</span> {renderInlineMath(numberedStep.text)}
+        </strong>
+      </p>
+    );
+  }
   const heading = getHeadingMeta(line);
   if (heading) {
     return (
@@ -1159,6 +1167,15 @@ function renderAnswerLine(line, key) {
     );
   }
   return <p key={key}>{renderInlineMath(line)}</p>;
+}
+
+function getNumberedStepMeta(line) {
+  const match = line.trim().match(/^(\d+)[.)]\s+(.+)$/);
+  if (!match) return null;
+  const text = match[2].replace(/[:：]\s*$/, "").trim();
+  const calculationHeadingTokens = ["공식", "대입", "계산", "산출", "결과", "해석", "조건", "변수", "자료", "단계"];
+  if (text.length > 32 || !calculationHeadingTokens.some((token) => text.includes(token))) return null;
+  return { number: match[1], text };
 }
 
 function getHeadingMeta(line) {
@@ -1271,6 +1288,24 @@ function buildDynamicChartTitle(chart) {
 
 function ChartPanel({ chart, compact = false }) {
   if (!chart) return null;
+  if (shouldSplitChartByScale(chart)) {
+    return (
+      <div className="chart-card-stack" aria-label={`${chart.title || "재무 추이"} 분리 그래프`}>
+        {chart.datasets.map((dataset) => (
+          <ChartPanel
+            key={dataset.key}
+            chart={{
+              ...chart,
+              subtitle: [chart.title?.replace(/ 재무 추이$/, ""), chart.subtitle].filter(Boolean).join(" · "),
+              datasets: [dataset],
+              range: undefined,
+            }}
+            compact={compact}
+          />
+        ))}
+      </div>
+    );
+  }
   const dynamicTitle = buildDynamicChartTitle(chart);
   return (
     <section className={`chart-card${compact ? " compact" : ""}`}>
@@ -1295,14 +1330,12 @@ function LineChart({ chart }) {
   const width = 420;
   const height = 240;
   const padding = { top: 18, right: 24, bottom: 34, left: 72 };
-  const useIndexedScale = shouldUseIndexedScale(chart);
   const plotDatasets = chart.datasets.map((dataset) => {
-    const baseValue = Number(dataset.points[0]?.y) || 1;
     return {
       ...dataset,
       points: dataset.points.map((point) => ({
         ...point,
-        y: useIndexedScale ? (Number(point.y) / baseValue) * 100 : Number(point.y),
+        y: Number(point.y),
       })),
     };
   });
@@ -1324,7 +1357,7 @@ function LineChart({ chart }) {
   const rawTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => minY + yRange * ratio);
   
   let formattedTicks = [];
-  if (useIndexedScale || chart.unit === "PERCENT" || chart.unit === "MULTIPLE") {
+  if (chart.unit === "PERCENT" || chart.unit === "MULTIPLE") {
     formattedTicks = rawTicks.map((t) => Math.round(t * 10) / 10);
   } else {
     formattedTicks = rawTicks.map((t) => {
@@ -1353,7 +1386,7 @@ function LineChart({ chart }) {
           <g key={tick}>
             <line className="chart-grid" x1={padding.left} y1={scaleY(tick)} x2={width - padding.right} y2={scaleY(tick)} />
             <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">
-              {useIndexedScale ? Math.round(tick) : formatChartValue(tick, chart.unit)}
+              {formatChartValue(tick, chart.unit)}
             </text>
           </g>
         ))}
@@ -1401,7 +1434,6 @@ function LineChart({ chart }) {
           <text key={`${tick.x}-${tick.label}`} x={scaleX(tick.x)} y={height - 10} textAnchor="middle">{tick.label}</text>
         ))}
       </svg>
-      {useIndexedScale ? <p className="chart-scale-note">계정별 첫해를 100으로 환산한 추이입니다.</p> : null}
       <div className="chart-legend">
         {chart.datasets.map((dataset, index) => (
           <span key={dataset.key}>
@@ -1422,13 +1454,13 @@ function buildMaxPointMarkers(datasets) {
   });
 }
 
-function shouldUseIndexedScale(chart) {
+function shouldSplitChartByScale(chart) {
+  if (chart.type !== "line") return false;
   if (chart.unit !== "KRW" || chart.datasets.length < 2) return false;
   const maxima = chart.datasets
     .map((dataset) => Math.max(...dataset.points.map((point) => Math.abs(Number(point.y)))))
     .filter((value) => Number.isFinite(value) && value > 0);
-  const hasValidBases = chart.datasets.every((dataset) => Number(dataset.points[0]?.y) > 0);
-  if (maxima.length < 2 || !hasValidBases) return false;
+  if (maxima.length < 2) return false;
   return Math.max(...maxima) / Math.min(...maxima) >= 4;
 }
 
