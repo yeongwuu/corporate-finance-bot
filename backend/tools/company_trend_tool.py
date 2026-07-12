@@ -60,6 +60,18 @@ PROFITABILITY_RATIO_DEFINITIONS = {
         "label": "총자본영업이익률",
         "required": ["operating_income", "total_assets"],
     },
+    "current_ratio": {
+        "label": "유동비율",
+        "required": ["current_assets", "current_liabilities"],
+    },
+    "quick_ratio": {
+        "label": "당좌비율",
+        "required": ["current_assets", "current_liabilities", "inventories"],
+    },
+    "debt_ratio": {
+        "label": "부채비율",
+        "required": ["total_liabilities", "total_equity"],
+    },
 }
 
 
@@ -188,6 +200,27 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     ratio_keys = _extract_ratio_accounts(question)
     account_keys = _extract_accounts(question, ratio_keys)
     series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
+    series = _fill_missing_series_with_yfinance(company, account_keys, series, period)
+
+    # Filter out years that have no valid account data to keep periods accurate
+    valid_series = []
+    for row in series:
+        has_data = False
+        for key in account_keys:
+            val = row.get(key)
+            if val and isinstance(val, dict) and val.get("amount") is not None:
+                has_data = True
+                break
+        if has_data:
+            valid_series.append(row)
+
+    if valid_series:
+        from dataclasses import replace
+        new_start = min(row["year"] for row in valid_series)
+        new_end = max(row["year"] for row in valid_series)
+        period = replace(period, start_year=new_start, end_year=new_end, source=f"{new_start}~{new_end}년" if new_start != new_end else f"{new_start}년")
+        series = [row for row in series if period.start_year <= row["year"] <= period.end_year]
+
     if not series:
         return {
             "status": "no_data",
@@ -995,6 +1028,12 @@ def _extract_ratio_accounts(question: str) -> list[str]:
         ratio_keys.append("roe")
     if any(token in compact for token in ["총자본영업이익률", "자산영업이익률"]):
         ratio_keys.append("operating_roa")
+    if any(token in compact for token in ["유동비율", "currentratio"]):
+        ratio_keys.append("current_ratio")
+    if any(token in compact for token in ["당좌비율", "quickratio"]):
+        ratio_keys.append("quick_ratio")
+    if any(token in compact for token in ["부채비율", "debtratio"]):
+        ratio_keys.append("debt_ratio")
     if any(token in compact for token in ["매출액이익률", "profitmargin"]) and not ratio_keys:
         ratio_keys.extend(["operating_margin", "net_margin"])
     if any(token in compact for token in ["이익률추이", "수익성비율", "수익성지표", "수익성분석"]) and not ratio_keys:
@@ -1050,6 +1089,17 @@ def _calculate_profitability_ratio(row: dict[str, Any], ratio_key: str) -> float
         return _safe_ratio(amount("net_income"), amount("total_equity"))
     if ratio_key == "operating_roa":
         return _safe_ratio(amount("operating_income"), amount("total_assets"))
+    if ratio_key == "current_ratio":
+        return _safe_ratio(amount("current_assets"), amount("current_liabilities"))
+    if ratio_key == "quick_ratio":
+        curr_ast = amount("current_assets")
+        curr_lib = amount("current_liabilities")
+        inv = amount("inventories") or 0.0
+        if curr_ast is not None and curr_lib:
+            return _safe_ratio(curr_ast - inv, curr_lib)
+        return None
+    if ratio_key == "debt_ratio":
+        return _safe_ratio(amount("total_liabilities"), amount("total_equity"))
     return None
 
 
@@ -1291,3 +1341,107 @@ def _format_metric(metric: dict[str, Any]) -> str:
     if metric["cagr"] is not None:
         parts.append(f"CAGR {_format_ratio(metric['cagr'])}")
     return " ".join(parts)
+
+
+def _fill_missing_series_with_yfinance(company: Any, account_keys: list[str], series: list[dict], period: Any) -> list[dict]:
+    yf_mapping = {
+        "operating_income": "Operating Income",
+        "revenue": "Total Revenue",
+        "net_income": "Net Income",
+        "total_assets": "Total Assets",
+        "total_equity": "Total Capital Equity",
+        "total_liabilities": "Total Liabilities Net Minority Interest",
+        "operating_cash_flow": "Operating Cash Flow",
+        "current_assets": "Current Assets",
+        "current_liabilities": "Current Liabilities",
+        "inventories": "Inventories",
+    }
+
+    missing_keys = []
+    for key in account_keys:
+        if key in yf_mapping:
+            is_missing = True
+            for row in series:
+                val = row.get(key)
+                if val and isinstance(val, dict) and val.get("amount") is not None:
+                    is_missing = False
+                    break
+            if is_missing:
+                missing_keys.append(key)
+
+    if not missing_keys:
+        return series
+
+    from tools.stock_price_tool import _to_yahoo_ticker
+    ticker_str = _to_yahoo_ticker(company.stock_code, company.market)
+
+    import yfinance as yf
+    try:
+        yf_ticker = yf.Ticker(ticker_str)
+        dfs = []
+        try:
+            financials = yf_ticker.financials
+            if financials is not None and not financials.empty:
+                dfs.append(financials)
+        except Exception:
+            pass
+        try:
+            balance_sheet = yf_ticker.balance_sheet
+            if balance_sheet is not None and not balance_sheet.empty:
+                dfs.append(balance_sheet)
+        except Exception:
+            pass
+        try:
+            cashflow = yf_ticker.cashflow
+            if cashflow is not None and not cashflow.empty:
+                dfs.append(cashflow)
+        except Exception:
+            pass
+
+        if not dfs:
+            return series
+
+        import pandas as pd
+        combined_df = pd.concat(dfs)
+
+        col_years = {}
+        for col in combined_df.columns:
+            if hasattr(col, "year"):
+                col_years[col.year] = col
+
+        for row in series:
+            year = int(row["year"])
+            col = col_years.get(year)
+            if col is None:
+                continue
+
+            for key in missing_keys:
+                yf_label = yf_mapping[key]
+                if yf_label in combined_df.index:
+                    val = combined_df.loc[yf_label, col]
+                    if isinstance(val, pd.Series):
+                        val = val.iloc[0]
+                    if pd.notna(val):
+                        row[key] = {
+                            "label": {
+                                "operating_income": "영업이익",
+                                "revenue": "매출액",
+                                "net_income": "당기순이익",
+                                "total_assets": "자산총계",
+                                "total_equity": "자본총계",
+                                "total_liabilities": "부채총계",
+                                "operating_cash_flow": "영업활동현금흐름",
+                                "current_assets": "유동자산",
+                                "current_liabilities": "유동부채",
+                                "inventories": "재고자산"
+                            }.get(key, key),
+                            "amount": float(val),
+                            "statement_type": "PL" if key in ["operating_income", "revenue", "net_income"] else "BS" if key in ["total_assets", "total_equity", "total_liabilities", "current_assets", "current_liabilities", "inventories"] else "CF",
+                            "account_name": yf_label,
+                            "account_code": yf_label,
+                            "currency": "KRW",
+                        }
+    except Exception:
+        pass
+
+    return series

@@ -20,6 +20,45 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
             return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주시면 최근 재무계정 추이를 분석해 드리겠습니다."
         return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주시면 자세히 조회해 드리겠습니다."
 
+    if calculation.get("status") == "no_data":
+        company = calculation.get("company") or {}
+        company_name = company.get("company_name") or "해당 기업"
+        stock_code = company.get("stock_code") or ""
+        industry_name = company.get("industry_name")
+
+        if stock_code and not industry_name:
+            try:
+                import sqlite3
+                from company_data.financial_store import FinancialStatementStore
+                store = FinancialStatementStore()
+                conn = sqlite3.connect(store.db_path)
+                row = conn.execute("SELECT industry_name FROM financial_items WHERE stock_code = ? LIMIT 1", (stock_code,)).fetchone()
+                if row:
+                    industry_name = row[0]
+                conn.close()
+            except Exception:
+                pass
+
+        peers = []
+        if industry_name:
+            try:
+                from company_data.financial_store import FinancialStatementStore
+                store = FinancialStatementStore()
+                peers = store.get_peers_in_industry(industry_name, stock_code, limit=2)
+            except Exception:
+                pass
+
+        base_msg = f"{company_name}의 재무 데이터를 데이터베이스에서 찾지 못했습니다."
+        if peers:
+            peer_names = "이나 ".join(f"'{p['company_name']}'" for p in peers)
+            return (
+                f"{base_msg}\n\n"
+                f"💡 **대체 질문 추천**:\n"
+                f"현재 동일 업종인 **'{industry_name}'**에 속해 있으면서 엑셀 재무 데이터가 확보된 {peer_names}의 재무 분석을 요청하시는 것은 어떨까요?\n"
+                f"예: `\"{peers[0]['company_name']} 최근 3개년 주요 재무계정 추이를 분석해줘\"`"
+            )
+        return base_msg + " 다른 기업명이나 종목코드로 다시 시도해 주세요."
+
     if calculation.get("status") == "latest_news":
         # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
         # and let LLM synthesize the news documents.
@@ -35,6 +74,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_industry_growth_comparison_answer(calculation)
     if calculation.get("mode") == "market_ratio_trend":
         return build_market_ratio_trend_answer(calculation)
+    if calculation.get("mode") == "rf_stock_forecast":
+        return build_rf_stock_forecast_answer(calculation)
     if calculation.get("ratio_series"):
         return build_ratio_trend_answer(calculation)
     if calculation.get("comparison"):
@@ -142,6 +183,34 @@ def build_ratio_trend_answer(calculation: dict) -> str:
         lines.append(f"{last['label']}은 {first['year']}년 {first['display']}에서 {last['year']}년 {last['display']}로 {direction}했습니다.")
 
     lines.append("계산에는 보유 재무제표의 손익계산서와 재무상태표 주요 계정을 사용했습니다.")
+    return "\n".join(lines)
+
+
+def build_rf_stock_forecast_answer(calculation: dict) -> str:
+    company = calculation.get("company") or {}
+    company_name = company.get("company_name", "해당 기업")
+    latest_close = calculation.get("latest_close") or 0.0
+    predicted_next_close = calculation.get("predicted_next_close") or 0.0
+    pred_return = calculation.get("pred_return") or 0.0
+    test_r2 = calculation.get("test_r2") or 0.0
+    test_mae = calculation.get("test_mae") or 0.0
+
+    from tools.stock_price_tool import _format_krw
+
+    lines = [
+        f"🤖 **랜덤포레스트 회귀(Random Forest Regressor) 기반 주가 예측 결과**",
+        f"",
+        f"**{company_name}**의 과거 주가 시계열 데이터를 기계학습 모델에 학습시켜 다음 영업일 종가를 예측한 결과입니다.",
+        f"",
+        f"*   **최신 종가 (현재가)**: {_format_krw(latest_close)}",
+        f"*   **예측 종가 (다음 영업일)**: **{_format_krw(predicted_next_close)}** (변동 예상치: **{pred_return:+.2f}%**)",
+        f"",
+        f"📊 **모델 검증 지표 (Model Validation Metrics)**",
+        f"*   **결정계수 ($R^2$ Score)**: `{test_r2:.4f}` (1.0에 가까울수록 과거 학습 성능이 높음을 의미)",
+        f"*   **평균절대오차 (MAE)**: `{_format_krw(test_mae)}` (실제 가격 대비 평균 예측 오차 수준)",
+        f"",
+        f"💡 *이 예측 결과는 과거 일간 가격 변동 패턴(Lag 1~5, MA5, MA20)만을 고려한 기계학습 추세 추정치입니다. 실제 주가는 거시 경제 변수, 기업 이슈, 시장 수급 등에 의해 다르게 움직일 수 있으므로 투자 판단의 참고용으로만 활용해 주시기 바랍니다.*"
+    ]
     return "\n".join(lines)
 
 

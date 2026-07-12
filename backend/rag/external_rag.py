@@ -96,7 +96,12 @@ def search_external_docs(query: str, company_name: str | None = None, limit: int
 
 def tokenize(text: str) -> list[str]:
     raw_terms = re.findall(r"[가-힣A-Za-z0-9]+", text.lower())
-    stopwords = {"최근", "추이", "분석", "이유", "원인", "설명", "기업", "회사", "사업보고서", "뉴스"}
+    stopwords = {
+        "최근", "추이", "분석", "이유", "원인", "설명", "기업", "회사", "사업보고서", "뉴스",
+        "무엇이", "있을까", "이슈는", "어떤", "있는", "있을", "알려줘", "보여줘", "궁금해",
+        "이슈", "동향", "대해", "대한", "대해서", "무엇", "어떻게", "은", "는", "이", "가",
+        "을", "를", "의", "에", "로", "으로", "과", "와", "에서", "부터", "까지", "하고"
+    }
     terms = []
     for term in raw_terms:
         if len(term) < 2 or term in stopwords:
@@ -147,6 +152,8 @@ def chunk_text(text: str, max_chars: int = 1400) -> list[str]:
 
 def score_chunk(chunk: str, terms: list[str], company_name: str | None) -> int:
     lowered = chunk.lower()
+    if terms and not any(term in lowered for term in terms):
+        return 0
     score = sum(lowered.count(term) * 3 for term in terms)
     business_score = sum(lowered.count(term) for term in BUSINESS_TERMS)
     score += business_score
@@ -160,5 +167,10 @@ def score_chunk(chunk: str, terms: list[str], company_name: str | None) -> int:
 def _document_matches_company(path: Path, text: str, company_name: str) -> bool:
     compact_company = re.sub(r"\s+", "", company_name.lower())
     compact_path = re.sub(r"\s+", "", path.stem.lower())
+    
+    if path.name.startswith("news_"):
+        if compact_company not in compact_path:
+            return False
+            
     compact_head = re.sub(r"\s+", "", text[:2000].lower())
     return compact_company in compact_path or compact_company in compact_head

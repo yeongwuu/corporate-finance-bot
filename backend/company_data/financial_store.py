@@ -311,6 +311,28 @@ class FinancialStatementStore:
             conn.close()
         return [int(row[0]) for row in rows]
 
+    def get_peers_in_industry(self, industry_name: str, exclude_code: str, limit: int = 3) -> list[dict[str, Any]]:
+        self.ensure_database()
+        if not industry_name:
+            return []
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT stock_code, company_name, COUNT(*) as data_count
+                FROM financial_items
+                WHERE industry_name = ? AND stock_code != ?
+                GROUP BY stock_code, company_name
+                ORDER BY data_count DESC, company_name
+                LIMIT ?
+                """,
+                (industry_name, exclude_code, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def _load_company_year_rows(self, stock_code: str, fiscal_year: int) -> list[dict[str, Any]]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

@@ -893,9 +893,30 @@ function LineChart({ chart }) {
   const yRange = maxY - minY || 1;
   const xRange = maxX - minX || 1;
   const axisBreak = buildAxisBreak(yValues, minY, maxY, padding, height);
-  const yTicks = axisBreak
-    ? [minY, axisBreak.lowerEnd, axisBreak.upperStart, maxY]
-    : [0, 0.5, 1].map((ratio) => minY + yRange * ratio);
+  let rawTicks = [];
+  if (axisBreak) {
+    rawTicks = [minY, axisBreak.lowerEnd, (axisBreak.lowerEnd + axisBreak.upperStart) / 2, axisBreak.upperStart, maxY];
+  } else {
+    rawTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => minY + yRange * ratio);
+  }
+  
+  let formattedTicks = [];
+  if (chart.unit === "PERCENT" || chart.unit === "MULTIPLE") {
+    formattedTicks = rawTicks.map((t) => Math.round(t * 10) / 10);
+  } else {
+    formattedTicks = rawTicks.map((t) => {
+      const absVal = Math.abs(t);
+      if (absVal >= 1_0000_0000_0000) {
+        return Math.round(t / 1000_0000_0000) * 1000_0000_0000;
+      } else if (absVal >= 1_0000_0000) {
+        return Math.round(t / 1000_0000) * 1000_0000;
+      } else if (absVal >= 10_000) {
+        return Math.round(t / 1000) * 1000;
+      }
+      return Math.round(t);
+    });
+  }
+  const yTicks = [...new Set(formattedTicks)].sort((a, b) => a - b);
   const xTicks = buildXTicks(allPoints);
   const maxMarkers = buildMaxPointMarkers(chart.datasets, rawMaxY);
 
@@ -956,7 +977,7 @@ function LineChart({ chart }) {
                 <title>{`최댓값 ${marker.datasetLabel} ${marker.point.label}: ${marker.point.display}`}</title>
               </circle>
               <text x={textX} y={labelY} textAnchor={textAnchor}>
-                최댓값 {marker.point.display}
+                {marker.point.display}
               </text>
             </g>
           );

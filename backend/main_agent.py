@@ -269,6 +269,15 @@ def _should_use_context(question: str) -> bool:
 def _with_context(question: str, context_text: str) -> str:
     if not context_text:
         return question
+
+    from company_data.financial_store import FinancialStatementStore
+    store = FinancialStatementStore()
+    try:
+        if store.resolve_company(question) is not None:
+            return question
+    except Exception:
+        pass
+
     return (
         f"{question}\n\n"
         "이전 사용자 질문 맥락:\n"
@@ -298,6 +307,17 @@ def _combined_references(calculation: dict, knowledge_references: list[dict]) ->
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    # Route stability/profitability ratios for specific companies or time-series to company_trend_tool
+    if any(word in normalized for word in ["유동비율", "당좌비율", "현금비율", "부채비율", "자기자본비율", "이자보상비율", "roe", "roa"]):
+        if any(word in normalized for word in ["추이", "성장률", "연도별", "최근", "최신", "개년", "기간", "변동", "년도"]):
+            return "company_trend_tool"
+        try:
+            from company_data.financial_store import FinancialStatementStore
+            if FinancialStatementStore().resolve_company(question) is not None:
+                return "company_trend_tool"
+        except Exception:
+            pass
 
     # Route industry trend and market outlook questions
     if any(word in normalized for word in ["동향", "업황", "최근 동향", "최근동향", "산업동향", "산업 동향"]) and any(word in normalized for word in ["산업", "업종", "섹터", "분야", "시장"]):
@@ -668,6 +688,13 @@ def _is_stock_price_question(normalized: str) -> bool:
         "최근 6개월",
         "최근 3개월",
         "최근 5년",
+        "예측",
+        "전망",
+        "예상",
+        "모델",
+        "랜덤포레스트",
+        "머신러닝",
+        "학습",
     ]
     reason_terms = ["왜", "이유", "원인", "배경", "호재", "악재", "뉴스", "기사"]
     return any(term in normalized for term in analysis_terms) and not any(term in normalized for term in reason_terms)

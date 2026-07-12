@@ -20,6 +20,8 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
+    if calculation.get("mode") == "rf_stock_forecast":
+        return _build_rf_stock_forecast_chart(calculation)
     if tool_name == "company_trend_tool":
         industry_growth_chart = _build_industry_growth_comparison_chart(calculation)
         if industry_growth_chart:
@@ -327,3 +329,34 @@ def _format_amount(amount: float) -> str:
     if amount >= 10_000:
         return f"{sign}{amount / 10_000:.2f}만원"
     return f"{sign}{amount:,.0f}원"
+
+
+def _build_rf_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    prices_list = calculation.get("prices_list") or []
+    if not prices_list:
+        return None
+
+    points = []
+    for idx, item in enumerate(prices_list):
+        points.append({
+            "x": idx,
+            "y": item["close"],
+            "label": item["date"],
+            "display": f"{item['close']:,.0f}원",
+            "forecast": item["forecast"]
+        })
+
+    company = calculation.get("company") or {}
+    return {
+        "type": "line",
+        "title": f"{company.get('company_name', '기업')} 주가 및 RF 예측 전망",
+        "subtitle": "최근 15영업일 + 다음 영업일 예측",
+        "unit": "KRW_PRICE",
+        "datasets": [
+            {
+                "key": "close",
+                "label": "예상 종가" if points[-1]["forecast"] else "종가",
+                "points": points
+            }
+        ]
+    }

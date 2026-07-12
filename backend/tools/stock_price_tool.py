@@ -21,6 +21,10 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
             "summary": "재무제표 데이터에서 종목코드를 확인하지 못했습니다.",
             "steps": [str(exc)],
         }
+
+    normalized = question.lower()
+    if any(word in normalized for word in ["예측", "전망", "예상", "모델"]) and any(word in normalized for word in ["주가", "종가", "가격"]):
+        return predict_stock_price_rf(question, company)
     if not company:
         return {
             "status": "needs_company",
@@ -329,3 +333,141 @@ def _format_krw(value: float) -> str:
 
 def _format_percent(value: float) -> str:
     return f"{value * 100:.2f}%"
+
+
+def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
+    if not company:
+        return {
+            "status": "needs_company",
+            "summary": "주가를 예측할 회사명을 찾지 못했습니다.",
+            "steps": ["예: 삼성전자 최근 3년 주가를 예측해줘"],
+        }
+
+    duration_years = 5
+    match = re.search(r"최근\s*(\d+)\s*(?:개년|년)", question)
+    if match:
+        duration_years = max(1, min(10, int(match.group(1))))
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=int(duration_years * 365.25))
+
+    ticker = _to_yahoo_ticker(company.stock_code, company.market)
+    try:
+        frame = _download_naver_price_data(company.stock_code, start_date, end_date)
+        if frame.empty:
+            frame = _download_price_data(ticker, start_date, end_date)
+    except Exception as exc:
+        return {
+            "status": "price_fetch_error",
+            "summary": f"{company.company_name}의 주가 데이터를 불러오지 못했습니다.",
+            "steps": [f"데이터 쿼리 오류: {exc}"],
+            "company": company.__dict__,
+            "ticker": ticker,
+        }
+
+    if frame.empty or len(frame) < 30:
+        return {
+            "status": "no_data",
+            "summary": f"{company.company_name}의 주가 예측에 필요한 주가 시계열 데이터가 부족합니다.",
+            "steps": [f"가용 데이터 개수: {len(frame)}개 (최소 30영업일 이상 필요)"],
+            "company": company.__dict__,
+            "ticker": ticker,
+        }
+
+    import numpy as np
+    import pandas as pd
+
+    df = frame[["Close"]].copy()
+    df["target"] = df["Close"].shift(-1)
+
+    for i in range(1, 6):
+        df[f"lag_{i}"] = df["Close"].shift(i)
+
+    df["ma_5"] = df["Close"].rolling(window=5).mean()
+    df["ma_20"] = df["Close"].rolling(window=20).mean()
+    df = df.dropna()
+
+    if len(df) < 20:
+        return {
+            "status": "no_data",
+            "summary": "피처 구성에 필요한 학습 데이터 셋이 충분하지 않습니다.",
+            "steps": ["가용 연도가 너무 짧아 이동평균선(20일)을 채우지 못했습니다."],
+            "company": company.__dict__,
+            "ticker": ticker,
+        }
+
+    feature_cols = ["lag_1", "lag_2", "lag_3", "lag_4", "lag_5", "ma_5", "ma_20"]
+    X = df[feature_cols].values
+    y = df["target"].values
+
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import r2_score, mean_absolute_error
+
+    split_idx = int(len(df) * 0.9)
+    X_train, X_test = X[:split_idx], X[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+
+    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    test_r2 = r2_score(y_test, y_pred)
+    test_mae = mean_absolute_error(y_test, y_pred)
+
+    model.fit(X, y)
+
+    latest_close = float(frame.iloc[-1]["Close"])
+    latest_closes = frame["Close"].values[-20:]
+    lags = [latest_closes[-i] for i in range(1, 6)]
+    ma5 = np.mean(latest_closes[-5:])
+    ma20 = np.mean(latest_closes[-20:])
+
+    X_next = np.array([[*lags, ma5, ma20]])
+    predicted_next_close = float(model.predict(X_next)[0])
+    pred_return = (predicted_next_close / latest_close - 1.0) * 100.0
+
+    recent_closes = frame[["Close"]].tail(15).copy()
+    prices_list = []
+    for date_idx, close_row in zip(recent_closes.index, recent_closes.itertuples()):
+        date_str = date_idx.strftime("%Y-%m-%d") if hasattr(date_idx, "strftime") else str(date_idx)
+        prices_list.append({
+            "date": date_str,
+            "close": float(close_row.Close),
+            "forecast": False
+        })
+    next_date_str = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
+    prices_list.append({
+        "date": next_date_str,
+        "close": predicted_next_close,
+        "forecast": True
+    })
+
+    summary = (
+        f"랜덤포레스트 회귀모델로 {company.company_name}의 다음 영업일 주가를 예측한 결과, "
+        f"현재가 {_format_krw(latest_close)} 대비 **{pred_return:+.2f}%** 변동한 "
+        f"**{_format_krw(predicted_next_close)}**으로 전망됩니다. (검증 셋 결정계수 $R^2$: {test_r2:.2f}, MAE: {_format_krw(test_mae)})"
+    )
+
+    steps = [
+        f"예측 기업: {company.company_name}({company.stock_code})",
+        f"학습 기간: {start_date.isoformat()} ~ {end_date.isoformat()} (최근 {duration_years}년, {len(frame)}영업일 데이터)",
+        f"학습 알고리즘: RandomForestRegressor (sklearn, n_estimators=100)",
+        f"사용 특징(Features): Lag 1~5일 종가, 5일 이동평균(MA5), 20일 이동평균(MA20)",
+        f"검증 스코어: R2 결정계수 = {test_r2:.4f} / MAE = {_format_krw(test_mae)}",
+        f"다음 영업일 예측치: {_format_krw(predicted_next_close)} (현재가 {_format_krw(latest_close)} 대비 {pred_return:+.2f}% 변동 예상)"
+    ]
+
+    return {
+        "status": "ok",
+        "mode": "rf_stock_forecast",
+        "summary": summary,
+        "steps": steps,
+        "company": company.__dict__,
+        "ticker": ticker,
+        "latest_close": latest_close,
+        "predicted_next_close": predicted_next_close,
+        "pred_return": pred_return,
+        "test_r2": test_r2,
+        "test_mae": test_mae,
+        "prices_list": prices_list
+    }
