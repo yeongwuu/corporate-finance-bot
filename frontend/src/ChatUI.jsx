@@ -558,12 +558,8 @@ export default function ChatUI() {
 }
 
 function buildFallbackRecommendedQuestions() {
-  const bucket = Math.floor(Date.now() / 600000);
-  const start = bucket % FALLBACK_RECOMMENDED_QUESTIONS.length;
-  return Array.from(
-    { length: 5 },
-    (_, index) => FALLBACK_RECOMMENDED_QUESTIONS[(start + index) % FALLBACK_RECOMMENDED_QUESTIONS.length],
-  );
+  const shuffled = [...FALLBACK_RECOMMENDED_QUESTIONS].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, 5);
 }
 
 function MessageText({ message, onAskSuggestion }) {

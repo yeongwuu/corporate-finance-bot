@@ -146,7 +146,7 @@ DEFAULT_SEEDS = [
 _cached_questions: list[str] = []
 _last_refreshed = 0.0
 _question_cache_lock = Lock()
-_file_write_lock = threading.Lock()
+_file_write_lock = Lock()
 QUESTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "successful_questions.json")
 
 def _init_questions_file():
@@ -265,15 +265,11 @@ def find_similar_successful_questions(user_question: str) -> list[str]:
 @app.get("/api/recommended-questions")
 @app.get("/api/trending-questions", include_in_schema=False)
 def get_recommended_questions() -> dict:
-    global _cached_questions, _last_refreshed
-    now = time.monotonic()
-    with _question_cache_lock:
-        if not _cached_questions or now - _last_refreshed >= RECOMMENDED_QUESTION_TTL_SECONDS:
-            _cached_questions = _generate_guaranteed_questions()
-            _last_refreshed = now
+    # Generate dynamically shuffled fresh questions on every request
+    questions = _generate_guaranteed_questions()
     return {
-        "questions": _cached_questions,
-        "refresh_interval_seconds": RECOMMENDED_QUESTION_TTL_SECONDS,
+        "questions": questions,
+        "refresh_interval_seconds": 0,
     }
 
 
