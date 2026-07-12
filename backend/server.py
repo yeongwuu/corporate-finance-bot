@@ -19,6 +19,8 @@ app = FastAPI(title="Corporate Finance Bot API")
 logger = logging.getLogger("corporate_finance_bot")
 logging.basicConfig(level=logging.INFO)
 FEEDBACK_LOG_PATH = Path(__file__).resolve().parent / "data" / "feedback_failures.log"
+BACKEND_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_ROOT.parent
 
 
 def _cors_origins() -> list[str]:
@@ -140,19 +142,19 @@ def send_feedback_email(request: FeedbackEmailRequest) -> dict:
 
 
 def _send_feedback_email(request: FeedbackEmailRequest) -> dict:
-    host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    username = os.getenv("SMTP_USERNAME")
-    password = os.getenv("SMTP_PASSWORD")
-    from_email = os.getenv("SMTP_FROM_EMAIL") or username
-    to_email = os.getenv("FEEDBACK_EMAIL_TO", "11xcv@naver.com")
-    use_tls = os.getenv("SMTP_USE_TLS", "true").lower() != "false"
+    username = _get_config("SMTP_USERNAME") or _get_config("SMTP_USER")
+    password = _get_config("SMTP_PASSWORD") or _get_config("SMTP_PASS")
+    host = _get_config("SMTP_HOST") or _default_smtp_host(username)
+    port = int(_get_config("SMTP_PORT") or "587")
+    from_email = _get_config("SMTP_FROM_EMAIL") or _get_config("SMTP_FROM") or username
+    to_email = _get_config("FEEDBACK_EMAIL_TO") or _get_config("FEEDBACK_TO") or "11xcv@naver.com"
+    use_tls = (_get_config("SMTP_USE_TLS") or "true").lower() != "false"
 
     if not all([host, username, password, from_email]):
         _write_feedback_fallback(request, "missing_smtp_config")
         return {
             "status": "missing_config",
-            "message": "SMTP 설정이 없어 이메일은 전송하지 못했지만, 피드백 내용은 서버 로그에 저장했습니다.",
+            "message": "SMTP 설정이 없어 이메일은 전송하지 못했습니다. 피드백 내용은 서버 로그에 저장했습니다.",
         }
 
     message = EmailMessage()
@@ -207,3 +209,34 @@ def _write_feedback_fallback(request: FeedbackEmailRequest, reason: str) -> None
             file.write(payload)
     except Exception:
         logger.exception("Feedback fallback file write failed")
+
+
+def _get_config(name: str) -> str | None:
+    value = os.getenv(name)
+    if value:
+        return value.strip()
+
+    for env_path in [BACKEND_ROOT / ".env", PROJECT_ROOT / ".env"]:
+        if not env_path.exists():
+            continue
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+                continue
+            key, raw_value = line.split("=", 1)
+            if key.strip() == name:
+                cleaned = raw_value.strip().strip('"').strip("'")
+                return cleaned or None
+    return None
+
+
+def _default_smtp_host(username: str | None) -> str | None:
+    if not username:
+        return None
+    lowered = username.lower()
+    if lowered.endswith("@gmail.com"):
+        return "smtp.gmail.com"
+    if lowered.endswith("@naver.com"):
+        return "smtp.naver.com"
+    if lowered.endswith("@daum.net") or lowered.endswith("@kakao.com"):
+        return "smtp.daum.net"
+    return None

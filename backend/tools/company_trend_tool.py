@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,6 +74,8 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     news_requested = _should_fetch_news(question)
     try:
         comparison_companies = _resolve_comparison_companies(store, question) if _is_company_comparison_question(question) else []
+        if _asks_industry_peer_growth_comparison(question) and len(comparison_companies) >= 1:
+            return _analyze_industry_peer_growth_comparison(question, store, comparison_companies[0])
         if len(comparison_companies) >= 2:
             limit = 7 if _asks_defense_peer_group(question) else 3
             return _analyze_market_comparison(question, store, comparison_companies[:limit])
@@ -481,11 +484,109 @@ def _asks_defense_peer_group(question: str) -> bool:
     return any(token in compact for token in ["방산기업", "방위산업", "방산업체", "방산주"])
 
 
+def _asks_industry_peer_growth_comparison(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    peer_terms = ["다른", "동종", "업종", "산업", "섹터", "기업들", "peer", "피어"]
+    growth_terms = ["매출상승률", "매출성장률", "매출액상승률", "매출액성장률", "cagr", "성장률"]
+    return (
+        "비교" in compact
+        and any(term in compact for term in peer_terms)
+        and any(term in compact for term in growth_terms)
+        and any(term in compact for term in ["반도체", "동종", "업종", "산업", "섹터"])
+    )
+
+
 def _is_company_comparison_question(question: str) -> bool:
     compact = question.replace(" ", "").lower()
     return any(token in compact for token in ["비교", "vs", "대비"]) and not any(
         token in compact for token in ["비교기업", "대용기업"]
     )
+
+
+def _analyze_industry_peer_growth_comparison(
+    question: str, store: FinancialStatementStore, base_company: Any
+) -> dict[str, Any]:
+    industry = _extract_peer_industry(question, base_company)
+    peer_companies = _query_peer_companies(store, industry, base_company, limit=14)
+    summaries = []
+    for company in peer_companies:
+        available_years = store.available_years(company.stock_code)
+        if not available_years:
+            continue
+        period = _extract_period(question, available_years)
+        series = store.get_account_series(company.stock_code, ["revenue"], period.start_year, period.end_year)
+        metrics = _build_metric_summary(series, ["revenue"])
+        revenue_metric = _find_metric(metrics, "revenue")
+        if not revenue_metric or revenue_metric.get("growth") is None:
+            continue
+        summaries.append(
+            {
+                "company": company.__dict__,
+                "period": period.__dict__,
+                "series": series,
+                "metrics": [revenue_metric],
+                "growth": revenue_metric.get("growth"),
+                "cagr": revenue_metric.get("cagr"),
+                "start_amount": revenue_metric.get("start_amount"),
+                "end_amount": revenue_metric.get("end_amount"),
+                "is_base": company.stock_code == base_company.stock_code,
+            }
+        )
+
+    summaries.sort(
+        key=lambda item: (
+            item.get("cagr") if item.get("cagr") is not None else float("-inf"),
+            item.get("growth") if item.get("growth") is not None else float("-inf"),
+        ),
+        reverse=True,
+    )
+    for index, item in enumerate(summaries, start=1):
+        item["rank"] = index
+
+    base_summary = next((item for item in summaries if item.get("is_base")), None)
+    if not summaries:
+        return {
+            "status": "no_data",
+            "summary": f"{industry} 업종의 매출 성장률 비교 데이터를 찾지 못했습니다.",
+            "steps": ["비교에는 각 기업의 시작연도와 종료연도 매출액 데이터가 필요합니다."],
+            "company": base_company.__dict__,
+            "industry": industry,
+        }
+
+    steps = [
+        f"기준 기업: {base_company.company_name}({base_company.stock_code})",
+        f"비교 업종: {industry}",
+        f"비교 기준: 각 기업의 가용 최근 5개년 매출액 누적 성장률과 CAGR",
+    ]
+    for item in summaries[:10]:
+        metric = item["metrics"][0]
+        steps.append(
+            f"{item['rank']}. {item['company']['company_name']}: "
+            f"{metric['start_year']}년 {_format_amount(metric['start_amount'])} -> "
+            f"{metric['end_year']}년 {_format_amount(metric['end_amount'])}, "
+            f"누적 {_format_ratio(metric['growth'])}, CAGR {_format_ratio(metric['cagr']) if metric.get('cagr') is not None else '-'}"
+        )
+
+    summary = f"{industry} 기업 {len(summaries)}개사의 최근 매출상승률을 비교했습니다."
+    if base_summary:
+        metric = base_summary["metrics"][0]
+        summary = (
+            f"{base_company.company_name}는 {industry} 비교군 {len(summaries)}개사 중 "
+            f"CAGR 기준 {base_summary['rank']}위입니다. "
+            f"누적 매출상승률은 {_format_ratio(metric['growth'])}, CAGR은 "
+            f"{_format_ratio(metric['cagr']) if metric.get('cagr') is not None else '-'}입니다."
+        )
+
+    return {
+        "status": "ok",
+        "mode": "industry_growth_comparison",
+        "summary": summary,
+        "steps": steps,
+        "industry": industry,
+        "company": base_company.__dict__,
+        "comparison": summaries,
+        "chart_metric": "cagr",
+    }
 
 
 def _analyze_market_comparison(question: str, store: FinancialStatementStore, companies: list[Any]) -> dict[str, Any]:
@@ -564,6 +665,77 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
             "results": news_results,
         },
     }
+
+
+def _extract_peer_industry(question: str, base_company: Any) -> str:
+    compact = question.replace(" ", "")
+    if "반도체" in compact:
+        return "반도체"
+    match = re.search(r"([가-힣A-Za-z0-9]+)\s*(?:기업들|업종|산업|섹터)", question)
+    if match:
+        return match.group(1)
+    return _major_industry(getattr(base_company, "industry_name", "") or getattr(base_company, "company_name", ""))
+
+
+def _query_peer_companies(
+    store: FinancialStatementStore, industry: str, base_company: Any, limit: int
+) -> list[Any]:
+    store.ensure_database()
+    keywords = _peer_industry_keywords(industry)
+    where_parts = []
+    params: list[Any] = []
+    for keyword in keywords:
+        where_parts.append("(company_name LIKE ? OR industry_name LIKE ?)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+    where_sql = " OR ".join(where_parts) if where_parts else "1=1"
+    query = f"""
+        SELECT stock_code, company_name, market, industry_name, MAX(fiscal_year) AS latest_year
+        FROM financial_items
+        WHERE ({where_sql})
+        GROUP BY stock_code, company_name, market, industry_name
+        ORDER BY
+            CASE WHEN stock_code = ? THEN 0 ELSE 1 END,
+            latest_year DESC,
+            company_name
+        LIMIT ?
+    """
+    params.extend([base_company.stock_code, limit])
+    conn = sqlite3.connect(store.db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(query, params).fetchall()
+    finally:
+        conn.close()
+
+    companies = []
+    seen = set()
+    if base_company and base_company.stock_code:
+        companies.append(base_company)
+        seen.add(base_company.stock_code)
+    for row in rows:
+        if row["stock_code"] in seen:
+            continue
+        seen.add(row["stock_code"])
+        companies.append(
+            type(base_company)(
+                stock_code=row["stock_code"],
+                company_name=row["company_name"],
+                market=row["market"],
+                industry_name=row["industry_name"],
+                latest_year=int(row["latest_year"]),
+            )
+        )
+    return companies[:limit]
+
+
+def _peer_industry_keywords(industry: str) -> list[str]:
+    if industry == "반도체":
+        return ["반도체", "전자집적회로", "다이오드", "트랜지스터", "메모리", "웨이퍼", "집적회로"]
+    if industry == "바이오":
+        return ["바이오", "의약", "제약", "생물학"]
+    if industry == "방산":
+        return ["방산", "방위", "항공", "무기", "탄약"]
+    return [industry]
 
 
 def _clip_period(start_year: int, end_year: int, available_years: list[int], source: str) -> Period:

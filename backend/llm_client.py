@@ -21,6 +21,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_rule_based_answer(tool_name, calculation, [])
     if tool_name == "industry_rank_tool" and calculation.get("status") == "ok":
         return build_industry_rank_answer(calculation)
+    if calculation.get("mode") == "industry_growth_comparison":
+        return build_industry_growth_comparison_answer(calculation)
     if calculation.get("ratio_series"):
         return build_ratio_trend_answer(calculation)
     if calculation.get("comparison"):
@@ -46,22 +48,24 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
 
 def build_attachment_answer(question: str, attachment: dict[str, Any]) -> str:
     provider = normalize_provider(get_env("LLM_PROVIDER"))
+    if not provider and (get_env("LLM_API_KEY") or get_env("GEMINI_API_KEY")):
+        provider = "gemini"
     prompt = build_attachment_prompt(question, attachment)
     if provider == "gemini":
-        api_key = get_env("LLM_API_KEY")
+        api_key = get_env("LLM_API_KEY") or get_env("GEMINI_API_KEY")
         model = (get_env("LLM_MODEL") or "gemini-3.1-flash-lite").removeprefix("models/")
         if not api_key:
-            raise ValueError("LLM_API_KEY가 설정되지 않았습니다.")
+            raise ValueError("LLM_API_KEY 또는 GEMINI_API_KEY가 설정되지 않았습니다.")
         return call_gemini_generate_content(api_key=api_key, model=model, prompt=prompt, attachment=attachment).strip()
     if provider == "openai":
-        api_key = get_env("LLM_API_KEY")
-        model = get_env("LLM_MODEL")
+        api_key = get_env("LLM_API_KEY") or get_env("OPENAI_API_KEY")
+        model = get_env("LLM_MODEL") or "gpt-4.1-mini"
         if not api_key:
-            raise ValueError("LLM_API_KEY가 설정되지 않았습니다.")
+            raise ValueError("LLM_API_KEY 또는 OPENAI_API_KEY가 설정되지 않았습니다.")
         if not model:
             raise ValueError("LLM_MODEL이 설정되지 않았습니다.")
         return call_openai_responses(api_key=api_key, model=model, prompt=prompt, attachment=attachment).strip()
-    raise ValueError("파일 문제 풀이는 LLM_PROVIDER와 LLM_API_KEY 설정이 필요합니다.")
+    raise ValueError("파일 문제 풀이는 LLM_PROVIDER와 LLM_API_KEY 설정이 필요합니다. Gemini를 쓰려면 LLM_PROVIDER=gemini로 설정하세요.")
 
 
 def build_attachment_prompt(question: str, attachment: dict[str, Any]) -> str:
@@ -216,6 +220,43 @@ def build_company_comparison_answer(calculation: dict) -> str:
     return "\n".join(lines)
 
 
+def build_industry_growth_comparison_answer(calculation: dict) -> str:
+    comparison = calculation.get("comparison") or []
+    company = calculation.get("company") or {}
+    industry = calculation.get("industry") or "동종 업종"
+    base_name = company.get("company_name", "기준 기업")
+    base_item = next((item for item in comparison if item.get("is_base")), None)
+    lines = []
+    if base_item:
+        metric = (base_item.get("metrics") or [{}])[0]
+        lines.append(
+            f"{base_name}는 {industry} 비교군 {len(comparison)}개사 중 매출 CAGR 기준 "
+            f"{base_item.get('rank')}위입니다."
+        )
+        lines.append(
+            f"{metric.get('start_year')}~{metric.get('end_year')}년 누적 매출상승률은 "
+            f"{_format_display_percent(metric.get('growth'))}, CAGR은 "
+            f"{_format_display_percent(metric.get('cagr'))}입니다."
+        )
+    else:
+        lines.append(calculation.get("summary") or f"{industry} 기업들의 매출상승률을 비교했습니다.")
+
+    lines.append("매출상승률 상위 기업은 다음과 같습니다.")
+    for item in comparison[:7]:
+        metric = (item.get("metrics") or [{}])[0]
+        name = (item.get("company") or {}).get("company_name", "-")
+        marker = " (기준 기업)" if item.get("is_base") else ""
+        lines.append(
+            f"{item.get('rank')}. {name}{marker}: "
+            f"누적 {_format_display_percent(metric.get('growth'))}, "
+            f"CAGR {_format_display_percent(metric.get('cagr'))}"
+        )
+
+    lines.append("아래 그래프는 각 기업의 매출 CAGR을 비교한 막대그래프입니다.")
+    lines.append("분류는 재무제표 업종명과 회사명 키워드 기준이므로 공식 산업 분류와 일부 차이가 있을 수 있습니다.")
+    return "\n".join(lines)
+
+
 def build_stock_price_answer(calculation: dict) -> str:
     company = calculation.get("company") or {}
     stats = calculation.get("stats") or {}
@@ -252,6 +293,12 @@ def _format_display_price(value: Any) -> str:
     if value is None:
         return "-"
     return f"{float(value):,.0f}원"
+
+
+def _format_display_percent(value: Any) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value) * 100:.2f}%"
 
 
 def _format_display_amount(amount: float) -> str:

@@ -21,6 +21,9 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
     if calculation.get("status") != "ok":
         return None
     if tool_name == "company_trend_tool":
+        industry_growth_chart = _build_industry_growth_comparison_chart(calculation)
+        if industry_growth_chart:
+            return industry_growth_chart
         return _build_trend_chart(calculation)
     if tool_name == "company_analysis_tool":
         return _build_account_bar_chart(calculation)
@@ -145,6 +148,41 @@ def _build_account_bar_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
         "title": f"{company.get('company_name', '기업')} 주요 재무계정",
         "subtitle": f"{year}년 당기 기준" if year else "",
         "unit": "KRW",
+        "bars": bars,
+    }
+
+
+def _build_industry_growth_comparison_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    if calculation.get("mode") != "industry_growth_comparison":
+        return None
+    comparison = calculation.get("comparison") or []
+    bars = []
+    for item in comparison[:10]:
+        company = item.get("company") or {}
+        metric = (item.get("metrics") or [{}])[0]
+        cagr = metric.get("cagr")
+        if cagr is None:
+            continue
+        name = company.get("company_name") or company.get("stock_code") or "-"
+        label = f"{name}*" if item.get("is_base") else name
+        bars.append(
+            {
+                "key": company.get("stock_code") or name,
+                "label": label,
+                "value": float(cagr) * 100,
+                "display": f"{float(cagr) * 100:.2f}%",
+            }
+        )
+    if not bars:
+        return None
+
+    base = calculation.get("company") or {}
+    industry = calculation.get("industry") or "동종 업종"
+    return {
+        "type": "bar",
+        "title": f"{industry} 매출상승률 비교",
+        "subtitle": f"{base.get('company_name', '기준 기업')} 포함, CAGR 기준",
+        "unit": "PERCENT",
         "bars": bars,
     }
 

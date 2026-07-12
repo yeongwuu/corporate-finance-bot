@@ -137,6 +137,7 @@ h2 {
 
 .message.user {
   align-self: flex-end;
+  width: min(520px, 66%);
   background: var(--accent);
   border-color: var(--accent);
   color: #ffffff;
@@ -683,16 +684,33 @@ h2 {
 }
 
 .bar-track {
+  position: relative;
   height: 9px;
   overflow: hidden;
   background: var(--accent-soft);
   border-radius: 999px;
 }
 
+.bar-track::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(106, 74, 51, 0.35);
+  content: "";
+}
+
 .bar-fill {
+  position: absolute;
+  top: 0;
   height: 100%;
   background: linear-gradient(90deg, var(--accent), #eb8c00);
   border-radius: inherit;
+}
+
+.bar-fill.negative {
+  background: linear-gradient(90deg, #9c4f31, #c56b45);
 }
 
 .reference-list {
@@ -845,6 +863,10 @@ h2 {
 
   .message {
     width: 100%;
+  }
+
+  .message.user {
+    width: 88%;
   }
 
   .composer {

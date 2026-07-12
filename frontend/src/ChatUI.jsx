@@ -572,8 +572,34 @@ function shouldAskFeedbackConsent(data, answer) {
 function shouldShowAlternativeQuestions(answer, data) {
   const normalized = String(answer || "").replace(/\s+/g, " ").toLowerCase();
   if (normalized.includes("load failed")) return true;
-  if (data?.calculation?.status === "error") return true;
-  return normalized.includes("백엔드 서버에 연결하지 못했습니다") || normalized.includes("request failed");
+  const status = data?.calculation?.status || data?.status;
+  const failureStatuses = new Set([
+    "error",
+    "missing_data",
+    "needs_company",
+    "no_data",
+    "needs_latest_disclosure",
+    "missing_config",
+    "price_fetch_error",
+    "missing_dependency",
+  ]);
+  if (failureStatuses.has(status)) return true;
+  return [
+    "백엔드 서버에 연결하지 못했습니다",
+    "request failed",
+    "찾지 못했습니다",
+    "확인할 수 없습니다",
+    "제공하기 어렵습니다",
+    "분석하기 어렵습니다",
+    "계산하기 어렵습니다",
+    "계산하기에는 정보가 부족",
+    "현재 확보된 자료만으로는",
+    "데이터가 부족",
+    "정보가 부족",
+    "자료가 부족",
+    "정확한 답변이 어렵",
+    "정확한 pbr",
+  ].some((phrase) => normalized.includes(phrase.toLowerCase()));
 }
 
 function buildAlternativeQuestions(question) {
@@ -592,6 +618,13 @@ function buildAlternativeQuestions(question) {
 
   if (companyNames.length === 1) {
     const company = companyNames[0];
+    if (metric === "PBR") {
+      return [
+        "PBR을 구하는 공식은 무엇입니까?",
+        `${company}의 최근 주가 흐름을 보여줘`,
+        `${company}의 자본총계와 발행주식수를 확인해줘`,
+      ];
+    }
     return [
       `${company}의 ${metric}은 얼마입니까?`,
       `${company}의 ${metric} 추이는 어떻습니까?`,
@@ -600,8 +633,8 @@ function buildAlternativeQuestions(question) {
   }
 
   return [
-    `${metric}이 높은 기업을 알려줘`,
-    `최근 5개년 ${metric} 추이를 분석해줘`,
+    metric === "PBR" ? "PBR을 구하는 공식은 무엇입니까?" : `${metric}이 높은 기업을 알려줘`,
+    metric === "PBR" ? "PBR 계산에 필요한 주가와 BPS는 무엇입니까?" : `최근 5개년 ${metric} 추이를 분석해줘`,
     `${metric}을 계산하는 데 필요한 재무제표 계정은 무엇입니까?`,
   ];
 }
@@ -641,6 +674,7 @@ function extractMetric(question) {
     ["영업이익", ["영업이익"]],
     ["당기순이익", ["당기순이익", "순이익"]],
     ["주가", ["주가", "종가"]],
+    ["PBR", ["pbr", "주가순자산비율", "주가순자산배율"]],
     ["부채비율", ["부채비율"]],
     ["유동비율", ["유동비율"]],
   ];
@@ -967,7 +1001,13 @@ function BarChart({ chart }) {
         <div className="bar-row" key={bar.key}>
           <span>{bar.label}</span>
           <div className="bar-track">
-            <div className="bar-fill" style={{ width: `${Math.max(4, (Math.abs(bar.value) / maxValue) * 100)}%` }} />
+            <div
+              className={`bar-fill${bar.value < 0 ? " negative" : ""}`}
+              style={{
+                width: `${Math.max(4, (Math.abs(bar.value) / maxValue) * 50)}%`,
+                left: bar.value < 0 ? `${50 - (Math.abs(bar.value) / maxValue) * 50}%` : "50%",
+              }}
+            />
           </div>
           <strong>{bar.display}</strong>
         </div>

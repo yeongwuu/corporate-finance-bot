@@ -125,7 +125,7 @@ Notion 포트폴리오에서 면접관이 접속할 수 있게 하려면 공개 
 1. 이 저장소를 GitHub에 push합니다.
 2. Render에서 New Blueprint를 선택하고 이 저장소를 연결합니다.
 3. `corporate-finance-bot-api`와 `corporate-finance-bot-web` 두 서비스가 생성되는지 확인합니다.
-4. API 서비스의 환경변수에 LLM/DART/뉴스 키를 입력합니다. 주가 조회는 `yfinance`를 통해 Yahoo Finance 데이터를 사용하므로 별도 API 키가 필요하지 않습니다.
+4. API 서비스의 환경변수에 LLM/DART/뉴스 키를 입력합니다. 주가 조회는 네이버 금융 일별 종가를 우선 사용하고, 필요하면 Yahoo Finance를 보조로 사용하므로 별도 주가 API 키가 필요하지 않습니다.
 5. 분석 실패 질문을 이메일로 수집하려면 API 서비스에 SMTP 환경변수를 설정합니다.
 6. 배포가 끝나면 `corporate-finance-bot-web`의 `onrender.com` URL을 Notion에 연결합니다.
 
@@ -136,7 +136,8 @@ Notion 포트폴리오에서 면접관이 접속할 수 있게 하려면 공개 
 - Web은 `VITE_API_HOSTNAME`으로 API 서비스의 Render 호스트명을 받아 `https://...` API를 호출합니다.
 - API는 `BACKEND_CORS_ORIGIN_REGEX=https://.*\.onrender\.com` 설정으로 Render 정적 사이트의 요청을 허용합니다.
 - `backend/data/financials.sqlite.gz`를 사용해 배포 환경에서 엑셀 전체 파싱 시간을 줄입니다.
-- 분석 실패/데이터 부족 답변은 사용자 동의 팝업 후 `/api/feedback-email`로 질문과 답변을 전송할 수 있습니다. 이메일 발송에는 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `FEEDBACK_EMAIL_TO`가 필요합니다.
+- 분석 실패/데이터 부족 답변은 사용자 동의 팝업 후 `/api/feedback-email`로 질문과 답변을 전송할 수 있습니다. 이메일 발송에는 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `FEEDBACK_EMAIL_TO`가 필요합니다. Gmail을 쓰는 경우 `SMTP_HOST`는 생략 가능하며 `SMTP_USERNAME`과 앱 비밀번호 형태의 `SMTP_PASSWORD`를 설정합니다.
+- 이미지/PDF 첨부파일 문제 풀이는 비전 입력을 지원하는 LLM 설정이 필요합니다. Render API 서비스 환경변수에 `LLM_PROVIDER=gemini`, `LLM_MODEL=gemini-3.1-flash-lite`, `LLM_API_KEY` 또는 `GEMINI_API_KEY`를 설정합니다. OpenAI를 쓰는 경우 `LLM_PROVIDER=openai`, `LLM_MODEL`, `OPENAI_API_KEY` 또는 `LLM_API_KEY`를 설정합니다.
 
 포트폴리오 공개용으로는 Render 무료 인스턴스를 사용할 수 있지만, 무료 인스턴스는 비활성 상태 후 첫 요청이 느릴 수 있습니다. 면접 직전에는 배포 URL을 한 번 열어 API가 깨어 있는지 확인하는 편이 좋습니다.
 
