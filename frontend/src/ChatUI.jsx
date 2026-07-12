@@ -241,6 +241,9 @@ export default function ChatUI() {
 
       const answer = data.answer || "답변을 생성하지 못했습니다.";
       const needsCompany = data.calculation?.status === "needs_company";
+      const serverSuggestions = Array.isArray(data.suggestions)
+        ? data.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 3)
+        : [];
       setMessages([
         ...nextMessages,
         {
@@ -255,9 +258,11 @@ export default function ChatUI() {
             trace: data.trace || [],
             suggestions: needsCompany
               ? buildExampleCompanies(data.calculation?.suggested_companies)
-              : shouldShowAlternativeQuestions(answer, data)
-                ? buildAlternativeQuestions(displayQuestion)
-                : [],
+              : serverSuggestions.length
+                ? serverSuggestions
+                : shouldShowAlternativeQuestions(answer, data)
+                  ? buildAlternativeQuestions(displayQuestion)
+                  : [],
             suggestionTitle: needsCompany ? "예시 기업들" : undefined,
             failureConsent: shouldAskFeedbackConsent(data, answer)
               ? {
@@ -402,9 +407,9 @@ export default function ChatUI() {
                   title="문제를 업로드하세요!"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
-                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
@@ -412,10 +417,11 @@ export default function ChatUI() {
                   type="submit"
                   className="capsule-send-btn"
                   disabled={!canSubmit}
-                  title="전송"
-                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
+                  data-tooltip="질문을 전송합니다!"
+                  aria-label="질문 전송"
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
                     <line x1="22" y1="2" x2="11" y2="13" />
                     <polygon points="22 2 15 22 11 13 2 9 22 2" />
                   </svg>
@@ -498,27 +504,28 @@ export default function ChatUI() {
             title="문제를 업로드하세요!"
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', minHeight: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'center' }}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', minHeight: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'end' }}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
           <button
             type={isLoading ? "button" : "submit"}
-            className={isLoading ? "cancel-button" : undefined}
+            className={isLoading ? "send-button cancel-button" : "send-button"}
             disabled={!isLoading && !canSubmit}
             onClick={isLoading ? cancelMessage : undefined}
-            title={isLoading ? "취소" : "전송"}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', minHeight: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#ff4d4f' : (canSubmit ? 'var(--accent)' : 'var(--border)'), alignSelf: 'center' }}
+            data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다!"}
+            aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '10px', width: '56px', height: '56px', minHeight: '56px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#ff4d4f' : (canSubmit ? 'var(--accent)' : 'var(--border)'), alignSelf: 'end' }}
           >
             {isLoading ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
@@ -757,7 +764,7 @@ function FailureConsentPanel({ request }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "기록하지 못했습니다.");
       setDecision("agreed");
-      setNotice("동의한 질문만 개선 로그에 기록했습니다.");
+      setNotice("감사합니다.");
     } catch (error) {
       setNotice(error.message || "기록하지 못했습니다.");
     } finally {

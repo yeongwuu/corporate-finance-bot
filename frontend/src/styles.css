@@ -513,7 +513,7 @@ h2 {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 88px;
+  grid-template-columns: minmax(0, 1fr) 56px 56px;
   gap: 10px;
   padding: 12px;
   background: var(--surface);
@@ -568,7 +568,7 @@ h2 {
   width: 100%;
   min-height: 72px;
   max-height: 180px;
-  resize: vertical;
+  resize: none;
   border: 0;
   outline: none;
   color: #182026;
@@ -586,7 +586,9 @@ h2 {
   font-weight: 700;
 }
 
-.attach-button::after {
+.attach-button::after,
+.send-button::after,
+.capsule-send-btn::after {
   position: absolute;
   right: 50%;
   bottom: calc(100% + 8px);
@@ -610,7 +612,11 @@ h2 {
 }
 
 .attach-button:hover::after,
-.attach-button:focus-visible::after {
+.attach-button:focus-visible::after,
+.send-button:hover::after,
+.send-button:focus-visible::after,
+.capsule-send-btn:hover::after,
+.capsule-send-btn:focus-visible::after {
   opacity: 1;
   transform: translateX(50%) translateY(0);
 }
@@ -1287,6 +1293,7 @@ h2 {
 }
 
 .capsule-send-btn {
+  position: relative;
   background: var(--accent);
   color: #ffffff;
   font-size: 14px;

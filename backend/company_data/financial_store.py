@@ -58,12 +58,13 @@ class FinancialStatementStore:
         self.packaged_db_path = packaged_db_path
 
     def ensure_database(self) -> None:
+        database_is_usable = self._database_is_usable()
+        if database_is_usable and (not self.excel_path.exists() or self._database_is_fresh()):
+            return
+        if not database_is_usable and self._restore_packaged_database() and self._database_is_usable():
+            return
         if not self.excel_path.exists():
-            raise FileNotFoundError(f"Excel file not found: {self.excel_path}")
-        if self._database_is_fresh():
-            return
-        if self._restore_packaged_database():
-            return
+            raise FileNotFoundError(f"Usable financial database and Excel source not found: {self.excel_path}")
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.db_path.with_suffix(".sqlite.tmp")
@@ -79,6 +80,8 @@ class FinancialStatementStore:
             conn.close()
 
         tmp_path.replace(self.db_path)
+        if not self._database_is_usable():
+            raise RuntimeError("financial_items table was not created")
 
     def search_companies(self, query: str, limit: int = 10) -> list[CompanyMatch]:
         self.ensure_database()
@@ -198,7 +201,28 @@ class FinancialStatementStore:
         return rows
 
     def _database_is_fresh(self) -> bool:
-        return self.db_path.exists() and self.db_path.stat().st_mtime >= self.excel_path.stat().st_mtime
+        return (
+            self._database_is_usable()
+            and self.excel_path.exists()
+            and self.db_path.stat().st_mtime >= self.excel_path.stat().st_mtime
+        )
+
+    def _database_is_usable(self) -> bool:
+        if not self.db_path.exists() or self.db_path.stat().st_size == 0:
+            return False
+        try:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'financial_items'"
+                ).fetchone()
+                if not row:
+                    return False
+                return conn.execute("SELECT 1 FROM financial_items LIMIT 1").fetchone() is not None
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError:
+            return False
 
     def _restore_packaged_database(self) -> bool:
         if not self.packaged_db_path.exists():
