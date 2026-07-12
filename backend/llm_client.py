@@ -72,6 +72,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_industry_growth_comparison_answer(calculation)
     if calculation.get("mode") == "market_ratio_trend":
         return build_market_ratio_trend_answer(calculation)
+    if calculation.get("mode") == "roi_per_comparison":
+        return build_roi_per_comparison_answer(calculation)
     if calculation.get("mode") == "rf_stock_forecast":
         return build_rf_stock_forecast_answer(calculation)
     if calculation.get("ratio_series"):
@@ -267,6 +269,37 @@ def build_market_ratio_trend_answer(calculation: dict) -> str:
             )
 
     lines.append("계산은 연도말 종가와 상장주식수로 시가총액을 추정한 뒤 재무제표의 순이익, 자본총계, 매출액과 결합했습니다.")
+    return "\n".join(lines)
+
+
+def build_roi_per_comparison_answer(calculation: dict) -> str:
+    comparison = calculation.get("comparison") or []
+    preferred = calculation.get("preferred_company") or {}
+    lines = [calculation.get("summary") or "두 기업의 ROI와 PER을 비교했습니다."]
+    lines.extend(
+        [
+            "",
+            "1. 계산 기준",
+            "ROI는 당기순이익을 평균 총자산으로 나눈 대용치이며, PER은 시가총액을 당기순이익으로 나눴습니다.",
+            "",
+            "2. 비교 결과",
+        ]
+    )
+    for item in comparison:
+        company = item.get("company") or {}
+        lines.append(
+            f"{company.get('company_name', '기업')}({item.get('year')}년): "
+            f"ROI {item.get('roi_display')}, PER {item.get('per_display')}"
+        )
+    lines.extend(["", "3. 투자 판단"])
+    if preferred:
+        lines.append(
+            f"ROI와 PER만 놓고 보면 {preferred.get('company_name')}가 상대적으로 합리적입니다. "
+            f"{calculation.get('recommendation_rationale') or ''}"
+        )
+    else:
+        lines.append("두 지표만으로 한 기업의 우위를 명확히 판단하기 어렵습니다.")
+    lines.append("다만 실제 투자 전에는 성장성, 현금흐름, 업종 위험과 현재 주가를 함께 확인해야 합니다.")
     return "\n".join(lines)
 
 

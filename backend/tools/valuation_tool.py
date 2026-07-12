@@ -9,6 +9,10 @@ from tools.stock_price_tool import _download_naver_price_data, _download_price_d
 
 
 def analyze_valuation(question: str) -> dict:
+    comparison = calculate_company_roi_per_comparison(question)
+    if comparison["status"] != "no_calculation":
+        return comparison
+
     market_trend = calculate_market_ratio_trend(question)
     if market_trend["status"] in {"ok", "needs_company", "missing_data", "no_data", "missing_shares", "price_fetch_error"}:
         return market_trend
@@ -32,6 +36,130 @@ def analyze_valuation(question: str) -> dict:
             "성장률: g = 유보율 * ROE",
             "NPVGO = 성장모형 주가 - 무성장모형 주가",
         ],
+    }
+
+
+def calculate_company_roi_per_comparison(question: str) -> dict[str, Any]:
+    normalized = question.lower()
+    if not ("per" in normalized and "roi" in normalized and any(token in normalized for token in ["비교", "와", "과", "vs"])):
+        return {"status": "no_calculation", "summary": "", "steps": []}
+
+    store = FinancialStatementStore()
+    companies = []
+    seen = set()
+    for chunk in re.split(r"\s*(?:와|과|랑|하고|및|vs\.?|VS|비교)\s*", question):
+        company = store.resolve_company(chunk)
+        if company and company.stock_code not in seen:
+            seen.add(company.stock_code)
+            companies.append(company)
+    if len(companies) < 2:
+        return {
+            "status": "needs_company",
+            "summary": "ROI와 PER을 비교할 두 기업을 확인하지 못했습니다.",
+            "steps": ["예: 삼성전자와 아모레퍼시픽의 ROI와 PER을 비교해줘"],
+        }
+
+    results = []
+    failures = []
+    for company in companies[:4]:
+        years = store.available_years(company.stock_code)
+        if not years:
+            failures.append(f"{company.company_name}: 재무제표 연도 데이터 없음")
+            continue
+        fiscal_year = max(years)
+        rows = store.get_account_series(
+            company.stock_code,
+            ["net_income", "total_assets"],
+            max(min(years), fiscal_year - 1),
+            fiscal_year,
+        )
+        if any(_account_amount(row, "net_income") is None or _account_amount(row, "total_assets") is None for row in rows):
+            try:
+                from tools.company_trend_tool import _fill_missing_series_with_yfinance
+
+                rows = _fill_missing_series_with_yfinance(
+                    company,
+                    ["net_income", "total_assets"],
+                    rows,
+                    None,
+                )
+            except Exception:
+                pass
+        latest = next((row for row in reversed(rows) if int(row["year"]) == fiscal_year), None)
+        previous = next((row for row in reversed(rows) if int(row["year"]) < fiscal_year), None)
+        net_income = _account_amount(latest, "net_income")
+        latest_assets = _account_amount(latest, "total_assets")
+        previous_assets = _account_amount(previous, "total_assets")
+        average_assets = (
+            (latest_assets + previous_assets) / 2
+            if latest_assets is not None and previous_assets is not None
+            else latest_assets
+        )
+        roi = net_income / average_assets if net_income is not None and average_assets not in (None, 0) else None
+
+        shares = _fetch_listed_shares(company.stock_code, company.market)
+        close = _fetch_year_end_close(company.stock_code, company.market, fiscal_year)
+        per = close * shares / net_income if close and shares and net_income not in (None, 0) else None
+        per_source = f"{fiscal_year}년 말 종가·상장주식수·당기순이익"
+        if per is None:
+            per = _fetch_trailing_per(company.stock_code, company.market)
+            per_source = "최근 시장 데이터" if per is not None else per_source
+
+        if roi is None and per is None:
+            failures.append(f"{company.company_name}: ROI·PER 계산 데이터 부족")
+            continue
+        results.append(
+            {
+                "company": company.__dict__,
+                "year": fiscal_year,
+                "roi": roi,
+                "roi_display": f"{roi * 100:.2f}%" if roi is not None else "계산 불가",
+                "per": per,
+                "per_display": f"{per:.2f}배" if per is not None else "계산 불가",
+                "per_source": per_source,
+            }
+        )
+
+    if len(results) < 2:
+        return {
+            "status": "no_data",
+            "summary": "두 기업의 ROI와 PER을 함께 비교할 데이터를 충분히 확보하지 못했습니다.",
+            "steps": failures,
+            "comparison": results,
+        }
+
+    positive_per_results = [item for item in results if item.get("per") is not None and item["per"] > 0]
+    highest_roi = max((item for item in results if item.get("roi") is not None), key=lambda item: item["roi"], default=None)
+    lowest_per = min(positive_per_results, key=lambda item: item["per"], default=None)
+    if highest_roi and lowest_per and highest_roi["company"]["stock_code"] == lowest_per["company"]["stock_code"]:
+        preferred = highest_roi
+        rationale = "ROI가 더 높고 양(+)의 PER은 더 낮아 수익성과 가격 부담 두 기준에서 우위입니다."
+    else:
+        candidates = [item for item in results if item.get("roi") is not None and item.get("per") is not None and item["per"] > 0]
+        preferred = max(candidates, key=lambda item: item["roi"] / item["per"], default=highest_roi or lowest_per)
+        rationale = "ROI와 PER의 신호가 엇갈려 ROI/PER 균형이 상대적으로 나은 기업을 선택했습니다."
+
+    steps = [
+        "ROI 대용치 = 당기순이익 / 평균 총자산(기초·기말 총자산 평균)",
+        "PER = 시가총액 / 당기순이익",
+    ]
+    for item in results:
+        steps.append(
+            f"{item['company']['company_name']}({item['year']}년): ROI {item['roi_display']}, "
+            f"PER {item['per_display']} ({item['per_source']})"
+        )
+    if preferred:
+        steps.append(f"지표 기반 판단: {preferred['company']['company_name']} — {rationale}")
+    steps.append("이 판단은 ROI와 PER만 비교한 결과이며 성장성, 현금흐름, 업종 위험과 현재 주가는 별도로 확인해야 합니다.")
+    return {
+        "status": "ok",
+        "mode": "roi_per_comparison",
+        "summary": f"{results[0]['company']['company_name']}와 {results[1]['company']['company_name']}의 ROI와 PER을 비교했습니다.",
+        "steps": steps,
+        "comparison": results,
+        "preferred_company": preferred["company"] if preferred else None,
+        "recommendation_rationale": rationale if preferred else None,
+        "failures": failures,
     }
 
 
@@ -69,7 +197,7 @@ def calculate_market_ratio_trend(question: str) -> dict[str, Any]:
     start_year, end_year, period_label = _extract_year_period(question, available_years)
     account_keys = _required_accounts_for_market_ratios(ratio_keys)
     financial_rows = store.get_account_series(company.stock_code, account_keys, start_year, end_year)
-    shares = _fetch_listed_shares(company.stock_code)
+    shares = _fetch_listed_shares(company.stock_code, company.market)
     if not shares:
         return {
             "status": "missing_shares",
@@ -403,7 +531,15 @@ def _fetch_year_end_close(stock_code: str, market: str | None, fiscal_year: int)
     return None
 
 
-def _fetch_listed_shares(stock_code: str) -> float | None:
+def _account_amount(row: dict[str, Any] | None, account_key: str) -> float | None:
+    if not row:
+        return None
+    account = row.get(account_key)
+    amount = account.get("amount") if isinstance(account, dict) else None
+    return float(amount) if amount is not None else None
+
+
+def _fetch_listed_shares(stock_code: str, market: str | None = None) -> float | None:
     url = f"https://finance.naver.com/item/main.naver?code={stock_code.zfill(6)}"
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
@@ -411,7 +547,7 @@ def _fetch_listed_shares(stock_code: str) -> float | None:
             charset = response.headers.get_content_charset() or "utf-8"
             html = response.read().decode(charset, errors="ignore")
     except Exception:
-        return None
+        html = ""
 
     patterns = [
         r"상장주식수</th>\s*<td[^>]*>\s*<em[^>]*>([0-9,]+)</em>",
@@ -421,6 +557,30 @@ def _fetch_listed_shares(stock_code: str) -> float | None:
         match = re.search(pattern, html, flags=re.S)
         if match:
             return float(match.group(1).replace(",", ""))
+    try:
+        import yfinance as yf
+
+        ticker = yf.Ticker(_to_yahoo_ticker(stock_code, market))
+        shares = ticker.fast_info.get("shares")
+        if not shares:
+            shares = ticker.info.get("sharesOutstanding")
+        if shares:
+            return float(shares)
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_trailing_per(stock_code: str, market: str | None) -> float | None:
+    try:
+        import yfinance as yf
+
+        ticker = yf.Ticker(_to_yahoo_ticker(stock_code, market))
+        value = ticker.info.get("trailingPE")
+        if value is not None:
+            return float(value)
+    except Exception:
+        pass
     return None
 
 

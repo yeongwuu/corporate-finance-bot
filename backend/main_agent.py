@@ -47,17 +47,18 @@ def answer_finance_question(
     step_started = time.perf_counter()
     tool_name = select_tool(effective_question)
     tool_desc = _tool_description(tool_name)
+    progress_messages = _progress_messages(tool_name, effective_question)
     trace.append(_trace_item("분석 도구 선택", tool_desc, step_started))
 
     if on_step:
-        on_step(1, "질문에 필요한 분석을 준비하고 있습니다.")
+        on_step(1, progress_messages[0])
 
     step_started = time.perf_counter()
     knowledge_references = search_knowledge(effective_question)
     trace.append(_trace_item("재무 지식 검색", f"관련 기준 문서 {len(knowledge_references)}건을 확인했습니다.", step_started))
 
     if on_step:
-        on_step(2, "재무 데이터를 추출하고 분석하고 있습니다.")
+        on_step(2, progress_messages[1])
 
     step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)
@@ -68,7 +69,7 @@ def answer_finance_question(
         calculation["conversation_context"] = context_text
 
     if on_step:
-        on_step(3, "데이터 분석 결과를 정리하여 최적의 그래프와 답변 문장을 작성하고 있습니다.")
+        on_step(3, progress_messages[2])
 
     step_started = time.perf_counter()
     references = _combined_references(calculation, knowledge_references)
@@ -163,6 +164,45 @@ def _tool_description(tool_name: str) -> str:
         "rag_only": "공시 및 지식 RAG 분석",
     }
     return descriptions.get(tool_name, "종합 재무 의사결정 분석")
+
+
+def _progress_messages(tool_name: str, question: str) -> tuple[str, str, str]:
+    normalized = question.lower()
+    if any(keyword in normalized for keyword in ["뉴스", "동향", "업황", "이슈", "시장 흐름"]):
+        return (
+            "최신 뉴스와 관련 자료를 준비하고 있습니다.",
+            "관련 뉴스와 시장 동향을 수집하고 분석하고 있습니다.",
+            "뉴스 분석 결과를 정리하여 답변을 작성하고 있습니다.",
+        )
+    if tool_name == "stock_price_tool":
+        return (
+            "주가 분석에 필요한 자료를 준비하고 있습니다.",
+            "주가 흐름과 변동 지표를 분석하고 있습니다.",
+            "주가 분석 결과와 그래프를 정리하고 있습니다.",
+        )
+    if tool_name == "forecast_tool":
+        return (
+            "전망에 필요한 과거 데이터를 준비하고 있습니다.",
+            "과거 추이와 예측 값을 계산하고 있습니다.",
+            "전망 결과와 그래프를 정리하고 있습니다.",
+        )
+    if tool_name == "industry_rank_tool":
+        return (
+            "업종 비교에 필요한 기업 자료를 준비하고 있습니다.",
+            "대표 기업들의 지표를 비교하고 있습니다.",
+            "기업 비교 결과와 그래프를 정리하고 있습니다.",
+        )
+    if tool_name in {"finance_concept_tool", "rag_only"}:
+        return (
+            "질문과 관련된 재무 지식을 확인하고 있습니다.",
+            "관련 개념과 기준을 분석하고 있습니다.",
+            "분석 내용을 이해하기 쉽게 정리하고 있습니다.",
+        )
+    return (
+        "질문에 필요한 분석을 준비하고 있습니다.",
+        "재무 데이터를 추출하고 분석하고 있습니다.",
+        "분석 결과와 그래프를 정리하고 있습니다.",
+    )
 
 
 def _calculation_description(calculation: dict) -> str:

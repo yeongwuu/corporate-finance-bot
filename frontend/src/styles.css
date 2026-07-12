@@ -671,6 +671,11 @@ h2 {
   margin-top: 14px;
 }
 
+.echart {
+  width: 100%;
+  min-width: 0;
+}
+
 .message .chart-card-stack .chart-card.compact {
   margin-top: 0;
 }
@@ -1169,7 +1174,7 @@ h2 {
   justify-content: center;
   gap: 8px;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--text-muted);
   margin-bottom: 20px;
 }
@@ -1370,7 +1375,45 @@ h2 {
 .recommend-refresh-btn:hover {
   border-color: var(--accent) !important;
   color: var(--accent) !important;
+}
+
+.recommend-refresh-btn {
+  position: relative;
+}
+
+.recommend-refresh-btn svg {
+  transition: transform 160ms ease;
+}
+
+.recommend-refresh-btn:hover svg {
   transform: rotate(45deg);
+}
+
+.recommend-refresh-btn::after {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: max-content;
+  padding: 7px 9px;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(74, 47, 32, 0.14);
+  color: #4a2f20;
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.recommend-refresh-btn:hover::after,
+.recommend-refresh-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .recommended-sidebar {
@@ -1379,10 +1422,11 @@ h2 {
 
 .composer .attach-button,
 .composer button:has(svg) {
-  min-height: 28px !important;
+  min-height: 44px !important;
   background: transparent !important;
   border: 1px solid var(--border) !important;
-  width: 28px !important;
-  height: 28px !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 9px !important;
   box-shadow: none !important;
 }

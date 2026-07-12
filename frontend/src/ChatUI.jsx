@@ -1,6 +1,29 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as echarts from "echarts/core";
+import { BarChart as EChartsBarChart, LineChart as EChartsLineChart } from "echarts/charts";
+import {
+  AriaComponent,
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  MarkPointComponent,
+  TooltipComponent,
+} from "echarts/components";
+import { SVGRenderer } from "echarts/renderers";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+
+echarts.use([
+  EChartsLineChart,
+  EChartsBarChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  MarkPointComponent,
+  AriaComponent,
+  SVGRenderer,
+]);
 
 const API_HOSTNAME = import.meta.env?.VITE_API_HOSTNAME;
 const API_URL =
@@ -329,7 +352,7 @@ export default function ChatUI() {
             <div className="initial-recommend-section">
               <div className="recommend-title">
                 <span className="recommend-icon">💡</span>
-                <strong>이런 질문은 어떠세요?</strong>
+                <span>이런 질문은 어떠세요?</span>
               </div>
               <div className="recommend-grid">
                 <div className="recommend-row upper-row">
@@ -446,7 +469,7 @@ export default function ChatUI() {
                 <span className="loading-status">
                   <span aria-hidden="true" className="hourglass">⌛</span>
                   <span>{elapsedSeconds}s</span>
-                  <span>working</span>
+                  <span>working...</span>
                 </span>
               </div>
               <LoadingTrace activeStep={displayedActiveStep} stepTexts={stepTexts} />
@@ -542,9 +565,8 @@ export default function ChatUI() {
             type="button"
             className="recommend-refresh-btn"
             onClick={fetchRecommendedQuestions}
-            disabled={isLoading}
-            title="질문 재생성"
             data-tooltip="질문 재생성"
+            aria-label="질문 재생성"
             style={{
               background: 'transparent',
               border: '1px solid var(--border)',
@@ -899,6 +921,7 @@ function buildPreview(content) {
 
 function shouldAskFeedbackConsent(data, answer) {
   const status = data?.calculation?.status || data?.status;
+  if (status === "ok") return false;
   const failureStatuses = new Set([
     "error",
     "missing_data",
@@ -1327,131 +1350,85 @@ function ChartPanel({ chart, compact = false }) {
 }
 
 function LineChart({ chart }) {
-  const width = 420;
-  const height = 240;
-  const padding = { top: 18, right: 24, bottom: 34, left: 72 };
-  const plotDatasets = chart.datasets.map((dataset) => {
+  const option = useMemo(() => {
+    const colors = ["#d04a02", "#e59a2f", "#7d3f16", "#b85c4b"];
+    const labels = [...new Map(
+      chart.datasets.flatMap((dataset) => dataset.points.map((point) => [String(point.x), point.label || String(point.x)]))
+    ).values()];
+    const totalPoints = chart.datasets.reduce((count, dataset) => count + dataset.points.length, 0);
     return {
-      ...dataset,
-      points: dataset.points.map((point) => ({
-        ...point,
-        y: Number(point.y),
-      })),
+      animationDuration: 650,
+      animationEasing: "cubicOut",
+      color: colors,
+      aria: { enabled: true, decal: { show: false } },
+      grid: { top: chart.datasets.length > 1 ? 54 : 30, right: 26, bottom: totalPoints > 20 ? 58 : 34, left: 72, containLabel: false },
+      legend: chart.datasets.length > 1 ? {
+        top: 4,
+        right: 8,
+        itemWidth: 18,
+        itemHeight: 3,
+        textStyle: { color: "#6f625b", fontSize: 11 },
+      } : { show: false },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "rgba(255,255,255,0.97)",
+        borderColor: "#e1d4ca",
+        borderWidth: 1,
+        padding: [9, 11],
+        textStyle: { color: "#27323a", fontSize: 12 },
+        extraCssText: "box-shadow:0 10px 28px rgba(74,47,32,.14);border-radius:8px;",
+        formatter: (params) => {
+          const rows = Array.isArray(params) ? params : [params];
+          const heading = rows[0]?.axisValueLabel || "";
+          return [heading, ...rows.map((item) => {
+            const rawValue = Array.isArray(item.value) ? item.value.at(-1) : item.value;
+            return `${item.marker}${item.seriesName}: <b>${item.data?.display || formatChartValue(Number(rawValue), chart.unit)}</b>`;
+          })].join("<br/>");
+        },
+      },
+      xAxis: {
+        type: "category",
+        data: labels,
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: "#d8cec5" } },
+        axisTick: { show: false },
+        axisLabel: { color: "#796b63", fontSize: 10, hideOverlap: true },
+      },
+      yAxis: {
+        type: "value",
+        scale: true,
+        splitNumber: 4,
+        axisLine: { show: true, lineStyle: { color: "#d8cec5" } },
+        axisTick: { show: false },
+        axisLabel: { color: "#796b63", fontSize: 10, formatter: (value) => formatChartValue(Number(value), chart.unit) },
+        splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
+      },
+      dataZoom: totalPoints > 40 ? [{ type: "inside", start: 60, end: 100 }, { type: "slider", height: 14, bottom: 4, borderColor: "transparent", fillerColor: "rgba(208,74,2,.12)" }] : [],
+      series: chart.datasets.map((dataset, index) => {
+        const maxPoint = dataset.points.reduce((max, point) => Number(point.y) > Number(max.y) ? point : max, dataset.points[0]);
+        return {
+          name: dataset.label,
+          type: "line",
+          smooth: dataset.points.length < 80 ? 0.28 : false,
+          showSymbol: dataset.points.length <= 60,
+          symbol: "circle",
+          symbolSize: dataset.points.length > 40 ? 4 : 7,
+          lineStyle: { width: 3, type: dataset.forecast ? "dashed" : "solid" },
+          itemStyle: { color: "#ffffff", borderColor: colors[index % colors.length], borderWidth: 2 },
+          emphasis: { focus: "series", lineStyle: { width: 4 } },
+          data: dataset.points.map((point) => ({ value: [point.label || String(point.x), Number(point.y)], display: point.display, name: point.label })),
+          markPoint: maxPoint ? {
+            symbol: "circle",
+            symbolSize: 11,
+            itemStyle: { color: "#ffffff", borderColor: colors[index % colors.length], borderWidth: 3 },
+            label: { show: true, position: "top", distance: 7, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: maxPoint.display },
+            data: [{ coord: [maxPoint.label || String(maxPoint.x), Number(maxPoint.y)], value: Number(maxPoint.y), name: "최댓값" }],
+          } : undefined,
+        };
+      }),
     };
-  });
-  const allPoints = plotDatasets.flatMap((dataset) => dataset.points);
-  const xValues = allPoints.map((point) => point.x);
-  const yValues = allPoints.map((point) => point.y);
-  const pointRadius = allPoints.length >= 100 ? 1.8 : 3.4;
-  const forecastRadius = allPoints.length >= 100 ? 2.6 : 4.5;
-  const maxMarkerRadius = allPoints.length >= 100 ? 3.2 : 5.2;
-  const minX = Math.min(...xValues);
-  const maxX = Math.max(...xValues);
-  const rawMinY = Math.min(...yValues);
-  const rawMaxY = Math.max(...yValues);
-  const paddingY = Math.max((rawMaxY - rawMinY) * 0.12, Math.abs(rawMaxY) * 0.03, 1);
-  const minY = rawMinY >= 0 ? Math.max(0, rawMinY - paddingY) : rawMinY - paddingY;
-  const maxY = rawMaxY + paddingY;
-  const yRange = maxY - minY || 1;
-  const xRange = maxX - minX || 1;
-  const rawTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => minY + yRange * ratio);
-  
-  let formattedTicks = [];
-  if (chart.unit === "PERCENT" || chart.unit === "MULTIPLE") {
-    formattedTicks = rawTicks.map((t) => Math.round(t * 10) / 10);
-  } else {
-    formattedTicks = rawTicks.map((t) => {
-      const absVal = Math.abs(t);
-      if (absVal >= 1_0000_0000_0000) {
-        return Math.round(t / 1000_0000_0000) * 1000_0000_0000;
-      } else if (absVal >= 1_0000_0000) {
-        return Math.round(t / 1000_0000) * 1000_0000;
-      } else if (absVal >= 10_000) {
-        return Math.round(t / 1000) * 1000;
-      }
-      return Math.round(t);
-    });
-  }
-  const yTicks = [...new Set(formattedTicks)].sort((a, b) => a - b);
-  const xTicks = buildXTicks(allPoints);
-  const maxMarkers = buildMaxPointMarkers(plotDatasets);
-
-  const scaleX = (value) => padding.left + ((value - minX) / xRange) * (width - padding.left - padding.right);
-  const scaleY = (value) => height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
-
-  return (
-    <div className="line-chart">
-      <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
-        {yTicks.map((tick) => (
-          <g key={tick}>
-            <line className="chart-grid" x1={padding.left} y1={scaleY(tick)} x2={width - padding.right} y2={scaleY(tick)} />
-            <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">
-              {formatChartValue(tick, chart.unit)}
-            </text>
-          </g>
-        ))}
-        <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} />
-        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} />
-        {plotDatasets.map((dataset, index) => {
-          const path = dataset.points
-            .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${scaleX(point.x)} ${scaleY(point.y)}`)
-            .join(" ");
-          return (
-            <g key={dataset.key}>
-              <path className={`chart-line line-${index % 4}${dataset.forecast ? " forecast" : ""}`} d={path} />
-              {dataset.points.map((point) => (
-                <circle
-                  key={`${dataset.key}-${point.x}`}
-                  className={point.forecast ? "forecast-point" : undefined}
-                  cx={scaleX(point.x)}
-                  cy={scaleY(point.y)}
-                  r={point.forecast ? forecastRadius : pointRadius}
-                >
-                  <title>{`${dataset.label} ${point.label}: ${point.display}`}</title>
-                </circle>
-              ))}
-            </g>
-          );
-        })}
-        {maxMarkers.map((marker) => {
-          const x = scaleX(marker.point.x);
-          const y = scaleY(marker.point.y);
-          const labelY = y < padding.top + 18 ? y + 18 : y - 10;
-          const textAnchor = x > width - padding.right - 52 ? "end" : x < padding.left + 52 ? "start" : "middle";
-          const textX = textAnchor === "end" ? x - 8 : textAnchor === "start" ? x + 8 : x;
-          return (
-            <g key={`${marker.datasetKey}-${marker.point.x}-max`} className="max-point-marker">
-              <circle cx={x} cy={y} r={maxMarkerRadius}>
-                <title>{`최댓값 ${marker.datasetLabel} ${marker.point.label}: ${marker.point.display}`}</title>
-              </circle>
-              <text x={textX} y={labelY} textAnchor={textAnchor}>
-                {marker.point.display}
-              </text>
-            </g>
-          );
-        })}
-        {xTicks.map((tick) => (
-          <text key={`${tick.x}-${tick.label}`} x={scaleX(tick.x)} y={height - 10} textAnchor="middle">{tick.label}</text>
-        ))}
-      </svg>
-      <div className="chart-legend">
-        {chart.datasets.map((dataset, index) => (
-          <span key={dataset.key}>
-            <i className={`legend-swatch line-${index % 4}`} />
-            {dataset.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function buildMaxPointMarkers(datasets) {
-  return datasets.flatMap((dataset) => {
-    if (!dataset.points?.length) return [];
-    const point = dataset.points.reduce((maxPoint, candidate) => candidate.y > maxPoint.y ? candidate : maxPoint);
-    return [{ datasetKey: dataset.key, datasetLabel: dataset.label, point }];
-  });
+  }, [chart]);
+  return <EChart option={option} ariaLabel={chart.title || "재무 추이 선 그래프"} />;
 }
 
 function shouldSplitChartByScale(chart) {
@@ -1462,20 +1439,6 @@ function shouldSplitChartByScale(chart) {
     .filter((value) => Number.isFinite(value) && value > 0);
   if (maxima.length < 2) return false;
   return Math.max(...maxima) / Math.min(...maxima) >= 4;
-}
-
-function buildXTicks(points) {
-  const unique = [];
-  const seen = new Set();
-  for (const point of points) {
-    if (seen.has(point.x)) continue;
-    seen.add(point.x);
-    unique.push({ x: point.x, label: point.label || String(point.x) });
-  }
-  unique.sort((a, b) => a.x - b.x);
-  if (unique.length <= 7) return unique;
-  const middle = unique[Math.floor(unique.length / 2)];
-  return [unique[0], middle, unique[unique.length - 1]];
 }
 
 function formatChartValue(value, unit) {
@@ -1490,24 +1453,65 @@ function formatChartValue(value, unit) {
 }
 
 function BarChart({ chart }) {
-  const maxValue = Math.max(...chart.bars.map((bar) => Math.abs(bar.value)), 1);
-  return (
-    <div className="bar-chart">
-      {chart.bars.map((bar) => (
-        <div className="bar-row" key={bar.key}>
-          <span>{bar.label}</span>
-          <div className="bar-track">
-            <div
-              className={`bar-fill${bar.value < 0 ? " negative" : ""}`}
-              style={{
-                width: `${Math.max(4, (Math.abs(bar.value) / maxValue) * 50)}%`,
-                left: bar.value < 0 ? `${50 - (Math.abs(bar.value) / maxValue) * 50}%` : "50%",
-              }}
-            />
-          </div>
-          <strong>{bar.display}</strong>
-        </div>
-      ))}
-    </div>
-  );
+  const option = useMemo(() => ({
+    animationDuration: 650,
+    animationEasing: "cubicOut",
+    aria: { enabled: true },
+    grid: { top: 12, right: 70, bottom: 28, left: 106 },
+    tooltip: {
+      trigger: "item",
+      backgroundColor: "rgba(255,255,255,0.97)",
+      borderColor: "#e1d4ca",
+      textStyle: { color: "#27323a", fontSize: 12 },
+      formatter: (params) => `${params.name}: <b>${params.data?.display || formatChartValue(Number(params.value), chart.unit)}</b>`,
+    },
+    xAxis: {
+      type: "value",
+      axisLabel: { color: "#796b63", fontSize: 10, formatter: (value) => formatChartValue(Number(value), chart.unit) },
+      splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
+    },
+    yAxis: {
+      type: "category",
+      inverse: true,
+      data: chart.bars.map((bar) => bar.label),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: "#4f4540", fontSize: 11, width: 96, overflow: "truncate" },
+    },
+    series: [{
+      type: "bar",
+      barMaxWidth: 24,
+      data: chart.bars.map((bar) => ({
+        value: Number(bar.value),
+        display: bar.display,
+        itemStyle: { color: Number(bar.value) < 0 ? "#b85c4b" : "#d04a02", borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
+        label: { show: true, position: Number(bar.value) < 0 ? "left" : "right", color: "#27323a", fontSize: 10, fontWeight: 700, formatter: bar.display },
+      })),
+    }],
+  }), [chart]);
+  return <EChart option={option} ariaLabel={chart.title || "재무 비교 막대그래프"} height={Math.max(230, chart.bars.length * 42)} />;
+}
+
+function EChart({ option, ariaLabel, height = 280 }) {
+  const containerRef = useRef(null);
+  const instanceRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    const instance = echarts.init(containerRef.current, null, { renderer: "svg" });
+    instanceRef.current = instance;
+    const observer = new ResizeObserver(() => instance.resize());
+    observer.observe(containerRef.current);
+    return () => {
+      observer.disconnect();
+      instance.dispose();
+      instanceRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    instanceRef.current?.setOption(option, { notMerge: true });
+  }, [option]);
+
+  return <div ref={containerRef} className="echart" style={{ height }} role="img" aria-label={ariaLabel} />;
 }
