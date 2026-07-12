@@ -195,11 +195,10 @@ h2 {
   max-width: 66%;
   padding: 10px 20px;
   border-radius: 24px;
-  border-bottom-right-radius: 4px;
-  background: #ffe4d6;
-  border-color: #ffd0b8;
-  color: #85370d;
-  box-shadow: 0 4px 16px rgba(196, 100, 55, 0.05);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(208, 74, 2, 0.1);
 }
 
 .message.assistant {
@@ -302,6 +301,65 @@ h2 {
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+
+.failure-consent {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: #27323a;
+}
+
+.failure-consent strong {
+  font-size: 13px;
+}
+
+.failure-consent p,
+.failure-consent span {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.failure-consent label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.failure-consent-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.failure-consent-actions button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #27323a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.failure-consent-actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.failure-consent-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .message-actions button {
@@ -638,18 +696,6 @@ h2 {
   stroke-dasharray: 6 5;
 }
 
-.chart-svg .axis-break path {
-  fill: none;
-  stroke: var(--text-muted);
-  stroke-width: 1.5;
-}
-
-.chart-svg .axis-break text {
-  fill: var(--text-muted);
-  font-size: 15px;
-  font-weight: 800;
-}
-
 .chart-svg circle {
   fill: #ffffff;
   stroke: var(--accent);
@@ -675,6 +721,13 @@ h2 {
 .chart-svg text {
   fill: var(--text-muted);
   font-size: 10px;
+}
+
+.chart-scale-note {
+  margin: -2px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .chart-line.line-0,
@@ -1071,7 +1124,7 @@ h2 {
 }
 
 .hero-logo-title {
-  font-size: 31px;
+  font-size: 62px;
   font-weight: 800;
   color: var(--accent);
   margin-bottom: 38px;
@@ -1089,14 +1142,14 @@ h2 {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-muted);
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .recommend-icon {
-  font-size: 16px;
+  font-size: 21px;
 }
 
 .recommend-grid {
@@ -1116,8 +1169,8 @@ h2 {
 }
 
 .recommend-pill-btn {
-  padding: 8px 16px;
-  font-size: 12px;
+  padding: 10px 20px;
+  font-size: 15px;
   font-weight: 700;
   border-radius: 9999px;
   background: #ffffff;
@@ -1263,13 +1316,18 @@ h2 {
   }
   
   .hero-logo-title {
-    font-size: 26px;
+    font-size: 38px;
     margin-bottom: 24px;
+  }
+
+  .recommend-title {
+    font-size: 15px;
+    margin-bottom: 12px;
   }
   
   .recommend-pill-btn {
-    padding: 6px 12px;
-    font-size: 11px;
+    padding: 8px 14px;
+    font-size: 13px;
   }
   
   .capsule-composer {
@@ -1291,3 +1349,12 @@ h2 {
   will-change: transform;
 }
 
+.composer .attach-button,
+.composer button:has(svg) {
+  min-height: 28px !important;
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  width: 28px !important;
+  height: 28px !important;
+  box-shadow: none !important;
+}

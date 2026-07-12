@@ -50,14 +50,14 @@ def answer_finance_question(
     trace.append(_trace_item("분석 도구 선택", tool_desc, step_started))
 
     if on_step:
-        on_step(1, f"분석 도구로 [{tool_desc}]를 준비하고 있습니다.")
+        on_step(1, f"분석 도구로 [{tool_desc}]을 준비하고 있습니다.")
 
     step_started = time.perf_counter()
     knowledge_references = search_knowledge(effective_question)
     trace.append(_trace_item("재무 지식 검색", f"관련 기준 문서 {len(knowledge_references)}건을 확인했습니다.", step_started))
 
     if on_step:
-        on_step(2, f"[{tool_desc}]를 가동하여 재무 데이터를 추출하고 분석하는 중입니다.")
+        on_step(2, f"[{tool_desc}]을 가동하여 재무 데이터를 추출하고 분석하는 중입니다.")
 
     step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)
@@ -148,20 +148,21 @@ def _trace_item(label: str, detail: str, started_at: float) -> dict:
 
 def _tool_description(tool_name: str) -> str:
     descriptions = {
-        "company_trend_tool": "기업 재무 추이와 최신 뉴스 흐름을 함께 보는 경로를 선택했습니다.",
-        "company_analysis_tool": "기업 재무제표 주요 계정을 조회하는 경로를 선택했습니다.",
-        "forecast_tool": "최근 재무 추이를 바탕으로 단순 전망을 계산하는 경로를 선택했습니다.",
-        "financial_ratio_tool": "재무비율 계산 경로를 선택했습니다.",
-        "industry_rank_tool": "산업/업종별 기업 순위를 조회하는 경로를 선택했습니다.",
-        "valuation_tool": "기업가치평가 관련 경로를 선택했습니다.",
-        "capital_budgeting_tool": "투자안 평가 관련 경로를 선택했습니다.",
-        "portfolio_tool": "포트폴리오 분석 경로를 선택했습니다.",
-        "cost_of_capital_tool": "자본비용 분석 경로를 선택했습니다.",
-        "mergers_acquisitions_tool": "M&A 분석 경로를 선택했습니다.",
-        "time_value_tool": "화폐의 시간가치 계산 경로를 선택했습니다.",
-        "rag_only": "계산 도구 없이 재무 지식 검색 중심 경로를 선택했습니다.",
+        "company_trend_tool": "재무 시계열 및 뉴스 트렌드 분석",
+        "company_analysis_tool": "재무제표 주요 항목 분석",
+        "forecast_tool": "추이 기반 실적 시뮬레이션",
+        "financial_ratio_tool": "안정성 및 수익성 재무비율 분석",
+        "industry_rank_tool": "산업 부문별 기업 비교 순위 분석",
+        "valuation_tool": "기업 내재 가치 평가 및 멀티플 분석",
+        "capital_budgeting_tool": "투자 안타당성 및 예산 분석",
+        "portfolio_tool": "자산 상관관계 및 포트폴리오 분석",
+        "cost_of_capital_tool": "자본비용(WACC) 산출 분석",
+        "mergers_acquisitions_tool": "M&A 시너지 및 거래 분석",
+        "time_value_tool": "화폐의 시간가치 계산 분석",
+        "stock_price_tool": "주가 데이터 및 기술적 지표 분석",
+        "rag_only": "공시 및 지식 RAG 분석",
     }
-    return descriptions.get(tool_name, f"{tool_name} 경로를 선택했습니다.")
+    return descriptions.get(tool_name, "종합 재무 의사결정 분석")
 
 
 def _calculation_description(calculation: dict) -> str:
@@ -449,7 +450,7 @@ def select_tool(question: str) -> str:
     if (
         any(word in normalized for word in ["추이", "성장률", "cagr", "연도별", "기간별", "원인", "이유", "왜", "인사이트", "사업보고서", "뉴스", "최근", "최신", "분기", "분기실적"])
         and any(word in normalized for word in ["매출", "영업이익", "순이익", "현금흐름", "자산", "부채", "자본", "재무제표", "기업", "실적"])
-        and not any(word in normalized for word in ["문제", "계산하시오", "구하시오", "공식"])
+        and not any(word in normalized for word in ["계산 문제", "계산문제", "계산하시오", "구하시오", "공식"])
     ):
         return "company_trend_tool"
 
@@ -481,7 +482,7 @@ def select_tool(question: str) -> str:
                 "현금흐름",
             ]
         )
-        and not any(word in normalized for word in ["문제", "계산하시오", "구하시오", "공식"])
+        and not any(word in normalized for word in ["계산 문제", "계산문제", "계산하시오", "구하시오", "공식"])
     ):
         return "company_analysis_tool"
 

@@ -797,6 +797,8 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
         "9. calculation.company.industry_name과 맞지 않는 산업 이슈를 전망 근거로 쓰지 않는다. "
         "예를 들어 바이오/의약품 기업에는 반도체, GPU, 데이터센터, 모바일, 디스플레이 업황을 언급하지 않는다. "
         "업종과 맞는 근거가 없으면 재무 추이 중심으로만 설명하고 근거 부족을 명확히 말한다.\n\n"
+        "10. 제공된 references(뉴스/공시)를 바탕으로 답변할 때, 반드시 각 자료의 날짜(published/date)를 꼼꼼히 확인하고 '가장 최근에 작성된 관련 기사'인지를 교차 검증해야 한다. "
+        "답변을 작성할 때 반드시 인용하는 뉴스의 발행일 또는 기준 시점(예: '2026년 7월 기사에 따르면...')을 명확히 명시하여 답변의 최신성과 사실 신뢰성을 보증하라.\n\n"
         "금지 표현:\n"
         "- RAG, backend, frontend, API, tool, calculation, 내부 지식 문서, 추가 근거, 확인 문서 같은 구현 용어를 답변에 쓰지 않는다.\n"
         "- 불필요한 Markdown 볼드체, 장식 이모티콘, 체크리스트형 '확인해야 할 추가 근거' 섹션을 만들지 않는다.\n\n"

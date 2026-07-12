@@ -683,7 +683,7 @@ def _analyze_industry_peer_growth_comparison(
 
 def _analyze_representative_industry_growth_comparison(question: str, store: FinancialStatementStore) -> dict[str, Any]:
     industry = resolve_representative_sector(question) or _extract_peer_industry(question, None)
-    if industry in REPRESENTATIVE_SECTOR_COMPANIES and not _asks_growth_comparison(question):
+    if not _asks_growth_comparison(question):
         return _analyze_representative_sector_snapshot(question, industry, store)
     representative_rows = select_representative_companies(store, industry, limit=5)
     companies = [
@@ -752,12 +752,18 @@ def _asks_growth_comparison(question: str) -> bool:
 def _analyze_representative_sector_snapshot(
     question: str, industry: str, store: FinancialStatementStore
 ) -> dict[str, Any]:
-    account_keys = _extract_accounts(question) or ["operating_income"]
+    account_keys = _extract_accounts(question) or ["revenue"]
     fiscal_year = max([int(year) for year in re.findall(r"20[1-2]\d", question)] or [2025])
     comparison = []
     failures = []
 
-    for company_name, stock_code in REPRESENTATIVE_SECTOR_COMPANIES[industry]:
+    if industry in REPRESENTATIVE_SECTOR_COMPANIES:
+        companies_list = REPRESENTATIVE_SECTOR_COMPANIES[industry]
+    else:
+        rows = select_representative_companies(store, industry, limit=5)
+        companies_list = [(row["company_name"], row["stock_code"]) for row in rows]
+
+    for company_name, stock_code in companies_list:
         accounts = {}
         data_source = "DART"
         dart_result = None
@@ -840,7 +846,7 @@ def _analyze_representative_sector_snapshot(
         "mode": "representative_sector_comparison",
         "summary": f"{industry} 대표 기업 {len(comparison)}개사의 {fiscal_year}년 {metric_labels}을 비교했습니다.",
         "steps": [
-            f"대표 기업 사전: {', '.join(name for name, _ in REPRESENTATIVE_SECTOR_COMPANIES[industry])}",
+            f"대표 기업군: {', '.join(name for name, _ in companies_list)}",
             f"비교 기준: {fiscal_year}년 연결재무제표 {metric_labels}",
             *[
                 f"{index}. {item['company']['company_name']}: "

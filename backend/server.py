@@ -122,15 +122,22 @@ class FeedbackEmailRequest(BaseModel):
     consent: bool
 
 
+class FailedQuestionLogRequest(BaseModel):
+    question: str
+    answer: str
+    tool: str | None = None
+    status: str | None = None
+    consent: bool
+
+
 @app.get("/health")
 def health_check() -> dict:
     return {"status": "ok"}
 
 
-import os
-
 RECOMMENDED_QUESTION_TTL_SECONDS = 10 * 60
 RECOMMENDED_QUESTION_COUNT = 5
+RECOMMENDED_QUESTION_POOL_SIZE = 200
 DEFAULT_SEEDS = [
     "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
     "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
@@ -141,21 +148,119 @@ DEFAULT_SEEDS = [
     "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
     "삼성전자의 최근 5개년 PER 추이를 계산해줘",
     "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
-    "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘"
+    "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+    "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘"
 ]
 
 _cached_questions: list[str] = []
 _last_refreshed = 0.0
 _question_cache_lock = Lock()
 _file_write_lock = Lock()
+_last_recommended_questions: set[str] = set()
 QUESTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "successful_questions.json")
 
 def _init_questions_file():
     os.makedirs(os.path.dirname(QUESTIONS_FILE), exist_ok=True)
-    if not os.path.exists(QUESTIONS_FILE):
-        with _file_write_lock:
+    with _file_write_lock:
+        try:
+            if os.path.exists(QUESTIONS_FILE):
+                with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                    questions = json.load(f)
+            else:
+                questions = list(DEFAULT_SEEDS)
+        except Exception:
+            questions = list(DEFAULT_SEEDS)
+
+        questions = [
+            q.replace("의 최근 당기순이익을 알려줘", "의 최근 3개년 당기순이익 추이를 분석해줘").strip()
+            for q in questions
+            if isinstance(q, str) and q.strip()
+        ]
+        questions = list(dict.fromkeys(questions))
+        if len(questions) < RECOMMENDED_QUESTION_POOL_SIZE:
+            generated = _generate_question_pool(RECOMMENDED_QUESTION_POOL_SIZE)
+            questions = list(dict.fromkeys([*questions, *generated]))[:RECOMMENDED_QUESTION_POOL_SIZE]
+
+        if not os.path.exists(QUESTIONS_FILE) or len(questions) >= RECOMMENDED_QUESTION_POOL_SIZE:
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
-                json.dump(DEFAULT_SEEDS, f, ensure_ascii=False, indent=2)
+                json.dump(questions, f, ensure_ascii=False, indent=2)
+
+
+def _generate_question_pool(limit: int) -> list[str]:
+    import sqlite3
+
+    from company_data.financial_store import FinancialStatementStore
+
+    company_templates = [
+        "{company}의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
+        "{company}의 최근 5개년 주요 재무계정 추이를 분석해줘",
+        "{company}의 최근 2개년 유동비율과 당좌비율을 알려줘",
+        "{company}의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+        "{company}의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
+        "{company}의 최근 3년 주가 흐름을 차트로 보여줘",
+        "{company}의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
+        "{company}의 최근 3개년 당기순이익 추이를 분석해줘",
+    ]
+    industry_templates = [
+        "{industry} 업종 대표 기업의 매출을 비교해줘",
+        "{industry} 업종의 최근 동향과 뉴스 흐름을 분석해줘",
+        "{industry} 업종의 매출 상위 5개 기업을 알려줘",
+    ]
+    fallback_companies = ["삼성전자", "SK하이닉스", "셀트리온", "한화시스템", "LIG넥스원"]
+    curated_industries = [
+        "반도체", "바이오", "방산", "자동차", "2차전지", "엔터테인먼트",
+        "증권", "은행", "보험", "소프트웨어", "건설", "화학",
+    ]
+
+    companies = []
+    industries = list(curated_industries)
+    try:
+        store = FinancialStatementStore()
+        store.ensure_database()
+        conn = sqlite3.connect(store.db_path)
+        try:
+            companies = [
+                row[0]
+                for row in conn.execute(
+                    """
+                    SELECT company_name
+                    FROM financial_items
+                    WHERE stock_code != ''
+                      AND company_name NOT LIKE '%스팩%'
+                      AND company_name NOT LIKE '%기업인수목적%'
+                    GROUP BY stock_code, company_name
+                    HAVING COUNT(DISTINCT fiscal_year) >= 5
+                    ORDER BY RANDOM()
+                    LIMIT 80
+                    """
+                ).fetchall()
+            ]
+            db_industries = [
+                row[0]
+                for row in conn.execute(
+                    """
+                    SELECT industry_name
+                    FROM financial_items
+                    WHERE industry_name != '' AND stock_code != ''
+                    GROUP BY industry_name
+                    HAVING COUNT(DISTINCT stock_code) >= 5
+                    ORDER BY COUNT(DISTINCT stock_code) DESC
+                    LIMIT 20
+                    """
+                ).fetchall()
+            ]
+            industries = list(dict.fromkeys([*curated_industries, *db_industries]))
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("Failed to build recommendations from financial DB: %s", exc)
+
+    companies = companies or fallback_companies
+    candidates = [template.format(company=company) for company in companies for template in company_templates]
+    candidates.extend(template.format(industry=industry) for industry in industries for template in industry_templates)
+    candidates = list(dict.fromkeys([*DEFAULT_SEEDS, *candidates]))
+    random.shuffle(candidates)
+    return candidates[:limit]
 
 def log_successful_question(question: str):
     _init_questions_file()
@@ -208,7 +313,8 @@ def log_failed_question(question: str, status: str, error_message: str):
             logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return only questions from the verified successful questions database."""
+    """Return a fresh set while avoiding the immediately previous recommendations."""
+    global _last_recommended_questions
     _init_questions_file()
     with _file_write_lock:
         try:
@@ -217,10 +323,14 @@ def _generate_guaranteed_questions() -> list[str]:
         except Exception:
             questions = list(DEFAULT_SEEDS)
     
-    if len(questions) < RECOMMENDED_QUESTION_COUNT:
-        questions = list(set(questions + DEFAULT_SEEDS))
-    
-    return random.sample(questions, RECOMMENDED_QUESTION_COUNT)
+    questions = list(dict.fromkeys([*questions, *DEFAULT_SEEDS]))
+    with _question_cache_lock:
+        available = [question for question in questions if question not in _last_recommended_questions]
+        if len(available) < RECOMMENDED_QUESTION_COUNT:
+            available = questions
+        selected = random.sample(available, min(len(available), RECOMMENDED_QUESTION_COUNT))
+        _last_recommended_questions = set(selected)
+    return selected
 
 
 def find_similar_successful_questions(user_question: str) -> list[str]:
@@ -271,7 +381,17 @@ def get_recommended_questions() -> dict:
     return {
         "questions": questions,
         "refresh_interval_seconds": 0,
+        "pool_size": _recommended_question_pool_size(),
     }
+
+
+def _recommended_question_pool_size() -> int:
+    _init_questions_file()
+    try:
+        with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+            return len(set(json.load(f)))
+    except Exception:
+        return len(set(DEFAULT_SEEDS))
 
 
 import queue
@@ -295,23 +415,13 @@ def chat(request: ChatRequest) -> StreamingResponse:
                 attachment=request.attachment,
                 on_step=on_step
             )
-            if res.get("status") == "ok" and not request.attachment:
+            result_status = (res.get("calculation") or {}).get("status") or res.get("status")
+            if result_status == "ok" and not request.attachment:
                 log_successful_question(request.question)
-            elif res.get("status") != "ok":
-                log_failed_question(
-                    question=request.question,
-                    status=res.get("status", "error"),
-                    error_message=res.get("summary") or res.get("message") or "질문 해석 및 연산 오류"
-                )
             res["suggestions"] = find_similar_successful_questions(request.question)
             q.put(f"event: result\ndata: {json.dumps(res, ensure_ascii=False)}\n\n")
         except Exception as e:
             logger.exception("Agent execution failed")
-            log_failed_question(
-                question=request.question,
-                status="system_exception",
-                error_message=str(e)
-            )
             q.put(f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n")
         finally:
             q.put(None)
@@ -326,6 +436,21 @@ def chat(request: ChatRequest) -> StreamingResponse:
             yield item
 
     return StreamingResponse(generator(), media_type="text/event-stream")
+
+
+@app.post("/api/failed-question-log")
+def save_failed_question_with_consent(request: FailedQuestionLogRequest) -> dict:
+    if not request.consent:
+        return {"status": "skipped", "message": "동의하지 않아 수집하지 않았습니다."}
+    if not request.question.strip() or not request.answer.strip():
+        return JSONResponse(status_code=422, content={"status": "error", "message": "질문과 답변이 필요합니다."})
+
+    log_failed_question(
+        question=request.question,
+        status=request.status or "error",
+        error_message=request.answer,
+    )
+    return {"status": "ok", "message": "동의한 실패 질문을 기록했습니다."}
 
 
 @app.post("/api/feedback-email")

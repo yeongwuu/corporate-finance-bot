@@ -27,6 +27,7 @@ const FALLBACK_RECOMMENDED_QUESTIONS = [
   "삼성전자의 최근 5개년 PER 추이를 계산해줘",
   "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
   "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+  "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘"
 ];
 
 export default function ChatUI() {
@@ -53,9 +54,7 @@ export default function ChatUI() {
     }
   }, [activeStep, displayedActiveStep, isLoading]);
 
-  const [pendingFeedback, setPendingFeedback] = useState(null);
   const [feedbackNotice, setFeedbackNotice] = useState("");
-  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
@@ -260,6 +259,14 @@ export default function ChatUI() {
                 ? buildAlternativeQuestions(displayQuestion)
                 : [],
             suggestionTitle: needsCompany ? "예시 기업들" : undefined,
+            failureConsent: shouldAskFeedbackConsent(data, answer)
+              ? {
+                  question: displayQuestion,
+                  answer,
+                  tool: data.tool,
+                  status: data.calculation?.status || data.status || "error",
+                }
+              : null,
           },
         },
       ]);
@@ -280,18 +287,12 @@ export default function ChatUI() {
             tool: error.name === "AbortError" ? "cancelled" : "network",
             status: error.name === "AbortError" ? "cancelled" : "error",
             suggestions: error.name === "AbortError" ? [] : buildAlternativeQuestions(displayQuestion),
+            failureConsent: error.name === "AbortError"
+              ? null
+              : { question: displayQuestion, answer, tool: "network", status: "error" },
           },
         },
       ]);
-      if (error.name !== "AbortError") {
-        setPendingFeedback({
-          question: displayQuestion,
-          attachmentName: attachment?.name,
-          answer,
-          tool: "network",
-          status: "error",
-        });
-      }
     } finally {
       abortControllerRef.current = null;
       setIsLoading(false);
@@ -302,35 +303,6 @@ export default function ChatUI() {
 
   function cancelMessage() {
     abortControllerRef.current?.abort();
-  }
-
-  async function submitFeedbackEmail() {
-    if (!pendingFeedback || isSendingFeedback) return;
-    setIsSendingFeedback(true);
-    setFeedbackNotice("");
-    try {
-      const response = await fetch(`${API_URL}/api/feedback-email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...pendingFeedback, consent: true }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "이메일 전송에 실패했습니다.");
-      }
-      setFeedbackNotice(data.message || "질문과 답변 내용을 전송했습니다.");
-      setPendingFeedback(null);
-    } catch (error) {
-      setFeedbackNotice(error.message || "이메일 전송에 실패했습니다.");
-      setPendingFeedback(null);
-    } finally {
-      setIsSendingFeedback(false);
-    }
-  }
-
-  function dismissFeedbackEmail() {
-    setPendingFeedback(null);
-    setFeedbackNotice("수집하지 않고 닫았습니다.");
   }
 
   function handleRecommendedQuestionClick(questionText) {
@@ -383,33 +355,6 @@ export default function ChatUI() {
                     </button>
                   ))}
                 </div>
-              </div>
-              <div className="recommend-refresh-container" style={{ display: 'flex', justifyContent: 'center', marginTop: '16px', marginBottom: '8px' }}>
-                <button
-                  type="button"
-                  className="recommend-refresh-btn"
-                  onClick={fetchRecommendedQuestions}
-                  disabled={isLoading}
-                  title="질문 재생성"
-                  data-tooltip="질문 재생성"
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border)',
-                    borderRadius: '50%',
-                    width: '32px',
-                    height: '32px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    color: 'var(--text-muted)',
-                    transition: 'border-color 160ms, color 160ms'
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-                  </svg>
-                </button>
               </div>
             </div>
 
@@ -550,26 +495,70 @@ export default function ChatUI() {
             type="button"
             className="attach-button"
             data-tooltip="문제를 업로드하세요!"
+            title="문제를 업로드하세요!"
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', minHeight: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'center' }}
           >
-            파일
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
           </button>
           <button
             type={isLoading ? "button" : "submit"}
             className={isLoading ? "cancel-button" : undefined}
             disabled={!isLoading && !canSubmit}
             onClick={isLoading ? cancelMessage : undefined}
+            title={isLoading ? "취소" : "전송"}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', minHeight: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#ff4d4f' : (canSubmit ? 'var(--accent)' : 'var(--border)'), alignSelf: 'center' }}
           >
-            {isLoading ? "취소" : "전송"}
+            {isLoading ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            )}
           </button>
         </form>
       </section>
 
       <aside ref={recommendedSidebarRef} className="recommended-sidebar" aria-label="추천 질문">
-        <div className="recommended-header">
-          <span className="recommended-icon" aria-hidden="true">💡</span>
-          <strong>이런 질문은 어떠세요?</strong>
+        <div className="recommended-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="recommended-icon" aria-hidden="true">💡</span>
+            <strong>이런 질문은 어떠세요?</strong>
+          </div>
+          <button
+            type="button"
+            className="recommend-refresh-btn"
+            onClick={fetchRecommendedQuestions}
+            disabled={isLoading}
+            title="질문 재생성"
+            data-tooltip="질문 재생성"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '50%',
+              width: '24px',
+              height: '24px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--text-muted)',
+              transition: 'border-color 160ms, color 160ms',
+              padding: 0
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+            </svg>
+          </button>
         </div>
         <div className="recommended-list">
           {recommendedQuestions.map((question, index) => (
@@ -604,8 +593,12 @@ export default function ChatUI() {
 }
 
 function buildFallbackRecommendedQuestions() {
-  const shuffled = [...FALLBACK_RECOMMENDED_QUESTIONS].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, 5);
+  const newsQuestion = "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘";
+  const rest = FALLBACK_RECOMMENDED_QUESTIONS.filter((q) => q !== newsQuestion);
+  const shuffledRest = [...rest].sort(() => Math.random() - 0.5);
+  const selected = shuffledRest.slice(0, 4);
+  selected.push(newsQuestion);
+  return selected.sort(() => Math.random() - 0.5);
 }
 
 function MessageText({ message, onAskSuggestion }) {
@@ -671,6 +664,7 @@ function MessageText({ message, onAskSuggestion }) {
           <SourcePanel references={message.meta?.references} />
         </>
       )}
+      <FailureConsentPanel request={message.meta?.failureConsent} />
       {!isInitialAssistantMessage ? (
         <div className="message-actions" aria-label="답변 작업">
           <button
@@ -709,13 +703,13 @@ function MessageText({ message, onAskSuggestion }) {
             aria-label="비추천"
             title="비추천"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', display: 'inline-block' }}>
-              <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm12-3h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', display: 'inline-block', transform: 'rotate(180deg)' }}>
+              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
             </svg>
             {feedbackBurst?.value === "down" ? (
               <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm12-3h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'rotate(180deg)' }}>
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
                 </svg>
               </span>
             ) : null}
@@ -739,6 +733,69 @@ function SuggestionPanel({ suggestions, title, onAskSuggestion }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function FailureConsentPanel({ request }) {
+  const [checked, setChecked] = useState(false);
+  const [decision, setDecision] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  if (!request) return null;
+
+  async function agreeToCollection() {
+    if (!checked || decision || isSubmitting) return;
+    setIsSubmitting(true);
+    setNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/failed-question-log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...request, consent: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "기록하지 못했습니다.");
+      setDecision("agreed");
+      setNotice("동의한 질문만 개선 로그에 기록했습니다.");
+    } catch (error) {
+      setNotice(error.message || "기록하지 못했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function declineCollection() {
+    if (decision || isSubmitting) return;
+    setChecked(false);
+    setDecision("declined");
+    setNotice("수집하지 않습니다.");
+  }
+
+  return (
+    <section className="failure-consent" aria-label="실패 질문 수집 동의">
+      <strong>답변 개선을 위한 실패 질문 수집</strong>
+      <p>질문과 실패 답변을 개선 로그에 저장할까요?</p>
+      {!decision ? (
+        <>
+          <label>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => setChecked(event.target.checked)}
+            />
+            수집에 동의합니다.
+          </label>
+          <div className="failure-consent-actions">
+            <button type="button" onClick={declineCollection}>비동의</button>
+            <button type="button" className="primary" onClick={agreeToCollection} disabled={!checked || isSubmitting}>
+              {isSubmitting ? "기록 중" : "동의"}
+            </button>
+          </div>
+        </>
+      ) : null}
+      {notice ? <span role="status">{notice}</span> : null}
+    </section>
   );
 }
 
@@ -1231,7 +1288,18 @@ function LineChart({ chart }) {
   const width = 420;
   const height = 240;
   const padding = { top: 18, right: 24, bottom: 34, left: 72 };
-  const allPoints = chart.datasets.flatMap((dataset) => dataset.points);
+  const useIndexedScale = shouldUseIndexedScale(chart);
+  const plotDatasets = chart.datasets.map((dataset) => {
+    const baseValue = Number(dataset.points[0]?.y) || 1;
+    return {
+      ...dataset,
+      points: dataset.points.map((point) => ({
+        ...point,
+        y: useIndexedScale ? (Number(point.y) / baseValue) * 100 : Number(point.y),
+      })),
+    };
+  });
+  const allPoints = plotDatasets.flatMap((dataset) => dataset.points);
   const xValues = allPoints.map((point) => point.x);
   const yValues = allPoints.map((point) => point.y);
   const pointRadius = allPoints.length >= 100 ? 1.8 : 3.4;
@@ -1246,16 +1314,10 @@ function LineChart({ chart }) {
   const maxY = rawMaxY + paddingY;
   const yRange = maxY - minY || 1;
   const xRange = maxX - minX || 1;
-  const axisBreak = buildAxisBreak(yValues, minY, maxY, padding, height);
-  let rawTicks = [];
-  if (axisBreak) {
-    rawTicks = [minY, axisBreak.lowerEnd, (axisBreak.lowerEnd + axisBreak.upperStart) / 2, axisBreak.upperStart, maxY];
-  } else {
-    rawTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => minY + yRange * ratio);
-  }
+  const rawTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => minY + yRange * ratio);
   
   let formattedTicks = [];
-  if (chart.unit === "PERCENT" || chart.unit === "MULTIPLE") {
+  if (useIndexedScale || chart.unit === "PERCENT" || chart.unit === "MULTIPLE") {
     formattedTicks = rawTicks.map((t) => Math.round(t * 10) / 10);
   } else {
     formattedTicks = rawTicks.map((t) => {
@@ -1272,13 +1334,10 @@ function LineChart({ chart }) {
   }
   const yTicks = [...new Set(formattedTicks)].sort((a, b) => a - b);
   const xTicks = buildXTicks(allPoints);
-  const maxMarkers = buildMaxPointMarkers(chart.datasets, rawMaxY);
+  const maxMarkers = buildMaxPointMarkers(plotDatasets);
 
   const scaleX = (value) => padding.left + ((value - minX) / xRange) * (width - padding.left - padding.right);
-  const scaleY = (value) => {
-    if (axisBreak) return scaleBrokenY(value, axisBreak);
-    return height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
-  };
+  const scaleY = (value) => height - padding.bottom - ((value - minY) / yRange) * (height - padding.top - padding.bottom);
 
   return (
     <div className="line-chart">
@@ -1286,19 +1345,14 @@ function LineChart({ chart }) {
         {yTicks.map((tick) => (
           <g key={tick}>
             <line className="chart-grid" x1={padding.left} y1={scaleY(tick)} x2={width - padding.right} y2={scaleY(tick)} />
-            <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">{formatChartValue(tick, chart.unit)}</text>
+            <text x={padding.left - 8} y={scaleY(tick) + 3} textAnchor="end">
+              {useIndexedScale ? Math.round(tick) : formatChartValue(tick, chart.unit)}
+            </text>
           </g>
         ))}
-        {axisBreak ? (
-          <g className="axis-break" aria-label="중간 축 생략">
-            <path d={`M ${padding.left - 9} ${axisBreak.gapMiddle - 4} q 4 -5 8 0 t 8 0`} />
-            <path d={`M ${padding.left + 8} ${axisBreak.gapMiddle - 4} q 4 -5 8 0 t 8 0`} />
-            <text x={padding.left - 36} y={axisBreak.gapMiddle + 4} textAnchor="middle">~</text>
-          </g>
-        ) : null}
         <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} />
         <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} />
-        {chart.datasets.map((dataset, index) => {
+        {plotDatasets.map((dataset, index) => {
           const path = dataset.points
             .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${scaleX(point.x)} ${scaleY(point.y)}`)
             .join(" ");
@@ -1340,6 +1394,7 @@ function LineChart({ chart }) {
           <text key={`${tick.x}-${tick.label}`} x={scaleX(tick.x)} y={height - 10} textAnchor="middle">{tick.label}</text>
         ))}
       </svg>
+      {useIndexedScale ? <p className="chart-scale-note">계정별 첫해를 100으로 환산한 추이입니다.</p> : null}
       <div className="chart-legend">
         {chart.datasets.map((dataset, index) => (
           <span key={dataset.key}>
@@ -1352,77 +1407,22 @@ function LineChart({ chart }) {
   );
 }
 
-function buildMaxPointMarkers(datasets, rawMaxY) {
-  const markers = [];
-  datasets.forEach((dataset) => {
-    dataset.points.forEach((point) => {
-      if (point.y === rawMaxY) {
-        markers.push({
-          datasetKey: dataset.key,
-          datasetLabel: dataset.label,
-          point,
-        });
-      }
-    });
+function buildMaxPointMarkers(datasets) {
+  return datasets.flatMap((dataset) => {
+    if (!dataset.points?.length) return [];
+    const point = dataset.points.reduce((maxPoint, candidate) => candidate.y > maxPoint.y ? candidate : maxPoint);
+    return [{ datasetKey: dataset.key, datasetLabel: dataset.label, point }];
   });
-  return markers.slice(0, 3);
 }
 
-function buildAxisBreak(values, minY, maxY, padding, height) {
-  if (minY < 0 || maxY <= 0) return null;
-  const positives = [...new Set(values.filter((value) => value > 0).sort((a, b) => a - b))];
-  if (positives.length < 3) return null;
-
-  let breakPair = null;
-  for (let index = 0; index < positives.length - 1; index += 1) {
-    const low = positives[index];
-    const high = positives[index + 1];
-    const ratio = high / Math.max(low, 1);
-    const gapShare = (high - low) / Math.max(maxY - minY, 1);
-    if (ratio >= 4 && gapShare >= 0.35 && (!breakPair || ratio > breakPair.ratio)) {
-      breakPair = { low, high, ratio };
-    }
-  }
-  if (!breakPair) return null;
-
-  const plotTop = padding.top;
-  const plotBottom = height - padding.bottom;
-  const plotHeight = plotBottom - plotTop;
-  const gapSize = 18;
-  const lowerHeight = plotHeight * 0.44;
-  const upperHeight = plotHeight - lowerHeight - gapSize;
-  const upperTop = plotTop;
-  const upperBottom = upperTop + upperHeight;
-  const gapTop = upperBottom;
-  const gapBottom = gapTop + gapSize;
-  const lowerTop = gapBottom;
-  const lowerBottom = plotBottom;
-
-  return {
-    minY,
-    maxY,
-    lowerEnd: breakPair.low,
-    upperStart: breakPair.high,
-    upperTop,
-    upperBottom,
-    lowerTop,
-    lowerBottom,
-    upperHeight,
-    lowerHeight,
-    gapMiddle: gapTop + gapSize / 2,
-  };
-}
-
-function scaleBrokenY(value, axisBreak) {
-  if (value <= axisBreak.lowerEnd) {
-    const range = axisBreak.lowerEnd - axisBreak.minY || 1;
-    return axisBreak.lowerBottom - ((value - axisBreak.minY) / range) * axisBreak.lowerHeight;
-  }
-  if (value >= axisBreak.upperStart) {
-    const range = axisBreak.maxY - axisBreak.upperStart || 1;
-    return axisBreak.upperBottom - ((value - axisBreak.upperStart) / range) * axisBreak.upperHeight;
-  }
-  return axisBreak.gapMiddle;
+function shouldUseIndexedScale(chart) {
+  if (chart.unit !== "KRW" || chart.datasets.length < 2) return false;
+  const maxima = chart.datasets
+    .map((dataset) => Math.max(...dataset.points.map((point) => Math.abs(Number(point.y)))))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const hasValidBases = chart.datasets.every((dataset) => Number(dataset.points[0]?.y) > 0);
+  if (maxima.length < 2 || !hasValidBases) return false;
+  return Math.max(...maxima) / Math.min(...maxima) >= 4;
 }
 
 function buildXTicks(points) {
