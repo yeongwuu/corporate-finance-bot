@@ -43,6 +43,68 @@ SEMICONDUCTOR_COMPANY_NAMES = [
     "원익IPS",
 ]
 
+REPRESENTATIVE_SECTOR_COMPANIES = {
+    "증권": [
+        ("미래에셋증권", "006800"),
+        ("NH투자증권", "005940"),
+        ("삼성증권", "016360"),
+        ("키움증권", "039490"),
+        ("대신증권", "003540"),
+    ],
+    "은행": [
+        ("KB금융", "105560"),
+        ("신한지주", "055550"),
+        ("하나금융지주", "086790"),
+        ("우리금융지주", "316140"),
+        ("기업은행", "024110"),
+    ],
+    "보험": [
+        ("삼성생명", "032830"),
+        ("삼성화재", "000810"),
+        ("DB손해보험", "005830"),
+        ("현대해상", "001450"),
+        ("한화생명", "088350"),
+    ],
+    "자동차": [
+        ("현대차", "005380"),
+        ("기아", "000270"),
+        ("현대모비스", "012330"),
+        ("HL만도", "204320"),
+        ("한온시스템", "018880"),
+    ],
+    "2차전지": [
+        ("LG에너지솔루션", "373220"),
+        ("삼성SDI", "006400"),
+        ("에코프로비엠", "247540"),
+        ("포스코퓨처엠", "003670"),
+        ("엘앤에프", "066970"),
+    ],
+    "엔터테인먼트": [
+        ("하이브", "352820"),
+        ("에스엠", "041510"),
+        ("JYP Ent.", "035900"),
+        ("와이지엔터테인먼트", "122870"),
+        ("디어유", "376300"),
+    ],
+}
+
+SECTOR_ALIASES = {
+    "증권": ["증권", "증권사", "금융투자", "브로커리지"],
+    "은행": ["은행", "은행주", "금융지주"],
+    "보험": ["보험", "보험사", "생명보험", "손해보험"],
+    "자동차": ["자동차", "완성차", "모빌리티"],
+    "2차전지": ["2차전지", "이차전지", "배터리"],
+    "엔터테인먼트": ["엔터테인먼트", "엔터사", "엔터 기업", "연예기획사"],
+}
+
+
+def resolve_representative_sector(text: str) -> str | None:
+    compact = text.replace(" ", "").lower()
+    for sector, aliases in SECTOR_ALIASES.items():
+        if any(alias.replace(" ", "").lower() in compact for alias in aliases):
+            return sector
+    return None
+
 
 def rank_industry_companies(question: str) -> dict[str, Any]:
     store = FinancialStatementStore()
@@ -397,6 +459,9 @@ def _company_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _extract_industry(question: str) -> str:
+    representative_sector = resolve_representative_sector(question)
+    if representative_sector:
+        return representative_sector
     if "반도체" in question:
         return "반도체"
     if "바이오" in question:

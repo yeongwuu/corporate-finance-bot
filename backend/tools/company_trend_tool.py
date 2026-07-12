@@ -10,7 +10,12 @@ from dart_client import DartClient, load_dart_api_key
 from news_client import NewsClient, get_env as get_news_env
 from rag.external_rag import search_external_docs
 from tools.company_analysis_tool import _format_amount, _format_ratio, _map_dart_accounts
-from tools.industry_rank_tool import select_representative_companies, _major_industry
+from tools.industry_rank_tool import (
+    REPRESENTATIVE_SECTOR_COMPANIES,
+    resolve_representative_sector,
+    select_representative_companies,
+    _major_industry,
+)
 
 
 ACCOUNT_LABELS = {
@@ -232,26 +237,21 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     metrics = [] if ratio_series else _build_metric_summary(series, account_keys)
     news_fetch_result = None
     documents = []
-    if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
-        news_fetch_result = _try_fetch_news(company, question)
-        if news_fetch_result.get("status") == "ok":
-            documents = _filter_industry_documents(
-                _news_documents_only(search_external_docs(news_fetch_result.get("query", question), company.company_name, limit=10)),
-                company,
-            )[:5]
-    else:
-        news_fetch_result = {
-            "status": "missing_config",
-            "message": "뉴스 근거 수집에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
-        }
+    if news_requested:
+        if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+            news_fetch_result = _try_fetch_news(company, question)
+            if news_fetch_result.get("status") == "ok":
+                documents = _filter_industry_documents(
+                    _news_documents_only(search_external_docs(news_fetch_result.get("query", question), company.company_name, limit=10)),
+                    company,
+                )[:5]
+        else:
+            news_fetch_result = {
+                "status": "missing_config",
+                "message": "뉴스 근거 수집에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+            }
 
     dart_fetch_result = None
-    if not documents and not news_requested:
-        documents = _filter_industry_documents(search_external_docs(question, company.company_name, limit=8), company)[:5]
-    if not documents and not news_requested and load_dart_api_key():
-        dart_fetch_result = _try_fetch_dart_report(company, period.end_year)
-        if dart_fetch_result.get("status") == "ok":
-            documents = _filter_industry_documents(search_external_docs(question, company.company_name, limit=8), company)[:5]
 
     insight_lines = [] if ratio_series else _build_insights(metrics, documents)
     evidence_lines = [] if ratio_series else _build_evidence_based_explanation(metrics, documents, company)
@@ -344,6 +344,11 @@ def _should_fetch_news(question: str) -> bool:
             "최근 이슈",
             "시장 반응",
             "업황",
+            "동향",
+            "원인",
+            "이유",
+            "배경",
+            "전망",
             "주가",
             "주식",
             "상승",
@@ -677,7 +682,9 @@ def _analyze_industry_peer_growth_comparison(
 
 
 def _analyze_representative_industry_growth_comparison(question: str, store: FinancialStatementStore) -> dict[str, Any]:
-    industry = _extract_peer_industry(question, None)
+    industry = resolve_representative_sector(question) or _extract_peer_industry(question, None)
+    if industry in REPRESENTATIVE_SECTOR_COMPANIES and not _asks_growth_comparison(question):
+        return _analyze_representative_sector_snapshot(question, industry, store)
     representative_rows = select_representative_companies(store, industry, limit=5)
     companies = [
         CompanyMatch(
@@ -734,6 +741,117 @@ def _analyze_representative_industry_growth_comparison(question: str, store: Fin
         "selection_note": selection_note,
         "comparison": summaries,
         "chart_metric": "cagr",
+    }
+
+
+def _asks_growth_comparison(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    return any(token in compact for token in ["성장률", "상승률", "cagr", "추이", "최근3년", "최근5년", "개년"])
+
+
+def _analyze_representative_sector_snapshot(
+    question: str, industry: str, store: FinancialStatementStore
+) -> dict[str, Any]:
+    account_keys = _extract_accounts(question) or ["operating_income"]
+    fiscal_year = max([int(year) for year in re.findall(r"20[1-2]\d", question)] or [2025])
+    comparison = []
+    failures = []
+
+    for company_name, stock_code in REPRESENTATIVE_SECTOR_COMPANIES[industry]:
+        accounts = {}
+        data_source = "DART"
+        dart_result = None
+        if load_dart_api_key():
+            try:
+                dart_result = DartClient().fetch_financial_accounts(
+                    stock_code=stock_code,
+                    corp_name=company_name,
+                    fiscal_year=fiscal_year,
+                )
+            except Exception as exc:
+                dart_result = {"status": "error", "message": str(exc)}
+            if dart_result.get("status") == "ok":
+                accounts = _map_dart_accounts(dart_result.get("accounts") or [])
+
+        if not accounts:
+            company = store.resolve_company(company_name)
+            if company:
+                stored = store.get_major_accounts(company_name, year=fiscal_year)
+                if stored.get("status") == "ok":
+                    accounts = stored.get("accounts") or {}
+                    data_source = "재무제표 DB"
+
+        metrics = []
+        series_row: dict[str, Any] = {"year": fiscal_year}
+        for account_key in account_keys:
+            account = accounts.get(account_key)
+            if not account or account.get("amount") is None:
+                continue
+            amount = float(account["amount"])
+            series_row[account_key] = {**account, "amount": amount, "source": data_source.lower()}
+            metrics.append(
+                {
+                    "key": account_key,
+                    "label": ACCOUNT_LABELS.get(account_key, account_key),
+                    "start_year": fiscal_year,
+                    "end_year": fiscal_year,
+                    "start_amount": amount,
+                    "end_amount": amount,
+                    "growth": None,
+                    "cagr": None,
+                }
+            )
+
+        if not metrics:
+            failures.append(f"{company_name}: {(dart_result or {}).get('message', '요청 계정 데이터 없음')}")
+            continue
+
+        comparison.append(
+            {
+                "company": {
+                    "company_name": company_name,
+                    "stock_code": stock_code,
+                    "market": "유가증권/코스닥",
+                    "industry_name": industry,
+                    "latest_year": fiscal_year,
+                },
+                "period": {"start_year": fiscal_year, "end_year": fiscal_year, "source": data_source},
+                "series": [series_row],
+                "metrics": metrics,
+                "data_source": data_source,
+            }
+        )
+
+    comparison.sort(
+        key=lambda item: (item.get("metrics") or [{}])[0].get("end_amount") or float("-inf"),
+        reverse=True,
+    )
+    if not comparison:
+        return {
+            "status": "no_data",
+            "summary": f"{industry} 대표 기업의 {fiscal_year}년 재무 데이터를 확인하지 못했습니다.",
+            "steps": failures or ["DART_API_KEY와 해당 연도 사업보고서 계정을 확인해야 합니다."],
+            "industry": industry,
+        }
+
+    metric_labels = ", ".join(ACCOUNT_LABELS.get(key, key) for key in account_keys)
+    return {
+        "status": "ok",
+        "mode": "representative_sector_comparison",
+        "summary": f"{industry} 대표 기업 {len(comparison)}개사의 {fiscal_year}년 {metric_labels}을 비교했습니다.",
+        "steps": [
+            f"대표 기업 사전: {', '.join(name for name, _ in REPRESENTATIVE_SECTOR_COMPANIES[industry])}",
+            f"비교 기준: {fiscal_year}년 연결재무제표 {metric_labels}",
+            *[
+                f"{index}. {item['company']['company_name']}: "
+                + ", ".join(f"{metric['label']} {_format_amount(metric['end_amount'])}" for metric in item['metrics'])
+                for index, item in enumerate(comparison, start=1)
+            ],
+            *(["조회 보류: " + " | ".join(failures)] if failures else []),
+        ],
+        "industry": industry,
+        "comparison": comparison,
+        "external_references": [],
     }
 
 

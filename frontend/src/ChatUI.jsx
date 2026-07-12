@@ -31,7 +31,30 @@ export default function ChatUI() {
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
 
+  const [recommendedQuestions, setRecommendedQuestions] = useState([]);
+  const [recommendedQuestionsError, setRecommendedQuestionsError] = useState(false);
   const canSubmit = (input.trim().length > 0 || Boolean(attachedFile)) && !isLoading;
+
+  useEffect(() => {
+    const fetchRecommendedQuestions = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/recommended-questions`);
+        if (res.ok) {
+          const data = await res.json();
+          setRecommendedQuestions(data.questions || []);
+          setRecommendedQuestionsError(false);
+        } else {
+          setRecommendedQuestionsError(true);
+        }
+      } catch (err) {
+        console.error("Failed to fetch recommended questions", err);
+        setRecommendedQuestionsError(true);
+      }
+    };
+    fetchRecommendedQuestions();
+    const interval = window.setInterval(fetchRecommendedQuestions, 600000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!isLoading || !loadingStartedAt) {
@@ -104,37 +127,47 @@ export default function ChatUI() {
       let buffer = "";
       let data = null;
 
+      const processEventBlock = (block) => {
+        const eventLines = block.split(/\r?\n/);
+        const eventName = eventLines
+          .find((line) => line.startsWith("event:"))
+          ?.slice("event:".length)
+          .trim();
+        const rawData = eventLines
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice("data:".length).trimStart())
+          .join("\n");
+
+        if (!eventName || !rawData) return;
+
+        let parsed;
+        try {
+          parsed = JSON.parse(rawData);
+        } catch (error) {
+          console.error("Failed to parse event stream data", error);
+          return;
+        }
+
+        if (eventName === "step") {
+          setActiveStep(parsed.step_index);
+        } else if (eventName === "result") {
+          data = parsed;
+        } else if (eventName === "error") {
+          throw new Error(parsed.message || "서버에서 답변을 생성하지 못했습니다.");
+        }
+      };
+
       while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const eventBlocks = buffer.split(/\r?\n\r?\n/);
+        buffer = eventBlocks.pop() || "";
+        eventBlocks.filter(Boolean).forEach(processEventBlock);
 
-        let currentEvent = null;
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-
-          if (trimmed.startsWith("event:")) {
-            currentEvent = trimmed.replace("event:", "").trim();
-          } else if (trimmed.startsWith("data:")) {
-            const rawData = trimmed.replace("data:", "").trim();
-            try {
-              const parsed = JSON.parse(rawData);
-              if (currentEvent === "step") {
-                setActiveStep(parsed.step_index);
-              } else if (currentEvent === "result") {
-                data = parsed;
-              } else if (currentEvent === "error") {
-                throw new Error(parsed.message || "Execution error");
-              }
-            } catch (err) {
-              console.error("Failed to parse event stream chunk", err);
-            }
-          }
+        if (done) {
+          if (buffer.trim()) processEventBlock(buffer);
+          break;
         }
       }
 
@@ -143,6 +176,7 @@ export default function ChatUI() {
       }
 
       const answer = data.answer || "답변을 생성하지 못했습니다.";
+      const needsCompany = data.calculation?.status === "needs_company";
       setMessages([
         ...nextMessages,
         {
@@ -155,9 +189,12 @@ export default function ChatUI() {
             references: buildDisplayReferences(data.references),
             chart: data.chart,
             trace: data.trace || [],
-            suggestions: shouldShowAlternativeQuestions(answer, data)
-              ? buildAlternativeQuestions(displayQuestion)
-              : [],
+            suggestions: needsCompany
+              ? buildExampleCompanies(data.calculation?.suggested_companies)
+              : shouldShowAlternativeQuestions(answer, data)
+                ? buildAlternativeQuestions(displayQuestion)
+                : [],
+            suggestionTitle: needsCompany ? "예시 기업들" : undefined,
           },
         },
       ]);
@@ -238,6 +275,11 @@ export default function ChatUI() {
   function dismissFeedbackEmail() {
     setPendingFeedback(null);
     setFeedbackNotice("수집하지 않고 닫았습니다.");
+  }
+
+  function handleRecommendedQuestionClick(questionText) {
+    if (isLoading) return;
+    sendMessage(questionText);
   }
 
   return (
@@ -335,6 +377,35 @@ export default function ChatUI() {
         </form>
       </section>
 
+      {messages.length === 1 && !isLoading ? (
+        <aside className="recommended-sidebar" aria-label="추천 질문">
+          <div className="recommended-header">
+            <span className="recommended-icon" aria-hidden="true">💡</span>
+            <strong>이런 질문은 어떠세요?</strong>
+          </div>
+          <p className="recommended-desc">챗봇이 지원하는 분석 질문을 10분마다 새롭게 보여드립니다.</p>
+          <div className="recommended-list">
+          {recommendedQuestions.map((question, index) => (
+            <button
+              key={question}
+              type="button"
+              className="recommended-card"
+              onClick={() => handleRecommendedQuestionClick(question)}
+              disabled={isLoading}
+            >
+              <span className="recommended-number">{index + 1}</span>
+              <span className="recommended-text">{question}</span>
+            </button>
+          ))}
+          {recommendedQuestions.length === 0 && (
+            <div className="recommended-empty" role="status">
+              {recommendedQuestionsError ? "추천 질문을 불러오지 못했습니다." : "추천 질문을 불러오는 중입니다..."}
+            </div>
+          )}
+          </div>
+        </aside>
+      ) : null}
+
       {feedbackNotice ? (
         <div className="feedback-toast" role="status">
           {feedbackNotice}
@@ -423,7 +494,11 @@ function MessageText({ message, onAskSuggestion }) {
         <>
           <div className="message-body">{formatAnswerText(visibleText)}</div>
           <ChartPanel chart={message.meta?.chart} compact />
-          <SuggestionPanel suggestions={message.meta?.suggestions} onAskSuggestion={onAskSuggestion} />
+          <SuggestionPanel
+            suggestions={message.meta?.suggestions}
+            title={message.meta?.suggestionTitle}
+            onAskSuggestion={onAskSuggestion}
+          />
           <SourcePanel references={message.meta?.references} />
         </>
       )}
@@ -470,11 +545,11 @@ function MessageText({ message, onAskSuggestion }) {
   );
 }
 
-function SuggestionPanel({ suggestions, onAskSuggestion }) {
+function SuggestionPanel({ suggestions, title, onAskSuggestion }) {
   if (!suggestions?.length) return null;
   return (
     <div className="suggestion-panel" aria-label="다시 시도할 수 있는 질문">
-      <strong>이 질문으로 다시 시도해볼 수 있습니다.</strong>
+      <strong>{title || "이 질문으로 다시 시도해볼 수 있습니다."}</strong>
       <div>
         {suggestions.map((suggestion) => (
           <button key={suggestion} type="button" onClick={() => onAskSuggestion?.(suggestion)}>
@@ -592,7 +667,6 @@ function shouldAskFeedbackConsent(data, answer) {
   const failureStatuses = new Set([
     "error",
     "missing_data",
-    "needs_company",
     "no_data",
     "needs_latest_disclosure",
     "missing_config",
@@ -612,6 +686,11 @@ function shouldAskFeedbackConsent(data, answer) {
     "답변을 생성하지 못했습니다",
     "연결하지 못했습니다",
   ].some((phrase) => normalized.includes(phrase));
+}
+
+function buildExampleCompanies(suggestedCompanies) {
+  const candidates = Array.isArray(suggestedCompanies) ? suggestedCompanies : [];
+  return [...new Set(["삼성전자", ...candidates.filter(Boolean)])].slice(0, 3);
 }
 
 function shouldShowAlternativeQuestions(answer, data) {
@@ -680,40 +759,77 @@ function buildAlternativeQuestions(question) {
   const metric = extractMetric(question);
   const contextKeyword = extractContextKeyword(question, metric);
 
+  if (companyNames.length === 0 && isFinancialConceptQuestion(question)) {
+    return filterAlternativeQuestions(question, [
+      `${metric}과 당기순이익의 차이를 설명해줘`,
+      `${metric}률의 계산 공식과 해석 방법을 알려줘`,
+      `재무제표에서 ${metric}을 확인할 때 주의할 점은 무엇입니까?`,
+    ]);
+  }
+
   if (companyNames.length >= 2) {
     const first = companyNames[0];
     const second = companyNames[1];
-    return [
+    return filterAlternativeQuestions(question, [
       `${first}와 ${second}의 최근 ${contextKeyword} 비교 추이를 분석해줘`,
       `${first}의 최근 ${contextKeyword}과 매출액을 함께 비교해줘`,
-    ];
+    ]);
   }
 
   if (companyNames.length === 1) {
     const company = companyNames[0];
     if (metric === "PBR") {
-      return [
+      return filterAlternativeQuestions(question, [
         `PBR을 구하는 공식과 해석 방법을 알려줘`,
         `${company}의 PBR 계산에 필요한 주가와 BPS를 확인해줘`,
-      ];
+      ]);
     }
     const isPriceRelated = ["주가", "종가", "가격"].some(term => question.includes(term));
     if (isPriceRelated) {
-      return [
+      return filterAlternativeQuestions(question, [
         `${company}의 최근 주가 변동성 및 최대낙폭(MDD)을 계산해줘`,
         `${company}의 최근 5년 주가를 가지고 다음 주가를 예측해줘`,
-      ];
+        `${company}의 최근 1년 주가 흐름을 차트로 보여줘`,
+      ]);
     }
-    return [
+    return filterAlternativeQuestions(question, [
       `${company}의 향후 ${contextKeyword} 전망을 계산해줘`,
       `${company}의 최근 ${contextKeyword}과 매출액을 비교해줘`,
-    ];
+    ]);
   }
 
-  return [
+  return filterAlternativeQuestions(question, [
     `${contextKeyword}을 계산하는 데 필요한 재무제표 계정은 무엇입니까?`,
     `최근 5개년 ${contextKeyword} 추이 전망을 분석해줘`,
-  ];
+  ]);
+}
+
+function filterAlternativeQuestions(originalQuestion, candidates) {
+  const originalKey = normalizeQuestionForComparison(originalQuestion);
+  const seen = new Set([originalKey]);
+
+  return candidates
+    .filter((candidate) => {
+      const key = normalizeQuestionForComparison(candidate);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 2);
+}
+
+function normalizeQuestionForComparison(question) {
+  return String(question || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s?.!,。？！]+/g, "");
+}
+
+function isFinancialConceptQuestion(question) {
+  const normalized = String(question || "").toLowerCase();
+  const conceptTerms = ["무엇", "뭐", "필요한", "계정", "계산 방법", "공식", "산식", "차이", "의미", "정의"];
+  const financialTerms = ["영업이익", "매출총이익", "당기순이익", "매출액", "영업이익률", "순이익률"];
+  return conceptTerms.some((term) => normalized.includes(term)) && financialTerms.some((term) => normalized.includes(term));
 }
 
 function extractCompanies(question) {

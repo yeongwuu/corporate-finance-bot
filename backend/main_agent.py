@@ -32,10 +32,14 @@ def answer_finance_question(
     if attachment:
         return answer_attachment_question(question, attachment, started_at)
 
-    context_text = _build_context_text(history or []) if _should_use_context(question) else ""
+    history = history or []
+    clarification_question = _resolve_company_clarification(question, history)
+    context_text = "" if clarification_question else (_build_context_text(history) if _should_use_context(question) else "")
     if context_text:
         trace.append(_trace_item("이전 질문 맥락 확인", "후속 질문 해석에 사용할 최근 사용자 질문을 반영했습니다.", started_at))
-    effective_question = _with_context(question, context_text)
+    if clarification_question:
+        trace.append(_trace_item("기업명 보완", "직전 미완성 질문에 사용자가 지정한 기업을 연결했습니다.", started_at))
+    effective_question = clarification_question or _with_context(question, context_text)
 
     if on_step:
         on_step(0)
@@ -56,6 +60,8 @@ def answer_finance_question(
 
     step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)
+    if isinstance(calculation, dict) and calculation.get("status") == "needs_company":
+        calculation["suggested_companies"] = _random_company_suggestions()
     trace.append(_trace_item("데이터 분석 실행", _calculation_description(calculation), step_started))
     if context_text and isinstance(calculation, dict):
         calculation["conversation_context"] = context_text
@@ -214,6 +220,37 @@ def _build_context_text(history: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _resolve_company_clarification(question: str, history: list[dict]) -> str | None:
+    if len(history) < 2:
+        return None
+    last_answer = history[-1]
+    if str(last_answer.get("role", "")).lower() != "assistant":
+        return None
+    if "어떤 기업이 궁금하세요" not in str(last_answer.get("content", "")):
+        return None
+
+    from company_data.financial_store import FinancialStatementStore
+
+    try:
+        company = FinancialStatementStore().resolve_company(question)
+    except Exception:
+        return None
+    if company is None:
+        return None
+
+    pending_question = next(
+        (
+            str(item.get("content", "")).strip()
+            for item in reversed(history[:-1])
+            if str(item.get("role", "")).lower() == "user" and str(item.get("content", "")).strip()
+        ),
+        "",
+    )
+    if not pending_question:
+        return None
+    return f"{pending_question}\n회사명: {company.company_name}({company.stock_code})"
+
+
 def _should_use_context(question: str) -> bool:
     normalized = question.lower().replace(" ", "")
     token_count = len(question.split())
@@ -258,9 +295,9 @@ def _should_use_context(question: str) -> bool:
         "2019~2025",
     ]
     if any(term in normalized for term in period_only_terms):
-        return True
+        return False
     if token_count <= 4 and any(term in normalized for term in ["최근", "기간", "개년", "연도별", "추이", "성장률"]):
-        return True
+        return False
 
     follow_up_terms = [
         "그럼",
@@ -322,9 +359,46 @@ def _combined_references(calculation: dict, knowledge_references: list[dict]) ->
     return combined
 
 
+def _random_company_suggestions() -> list[str]:
+    import sqlite3
+
+    from company_data.financial_store import FinancialStatementStore
+
+    store = FinancialStatementStore()
+    try:
+        store.ensure_database()
+        conn = sqlite3.connect(store.db_path)
+        try:
+            rows = conn.execute(
+                """
+                SELECT company_name
+                FROM financial_items
+                WHERE stock_code != ''
+                  AND company_name != '삼성전자'
+                  AND company_name NOT LIKE '%스팩%'
+                  AND company_name NOT LIKE '%기업인수목적%'
+                GROUP BY stock_code, company_name
+                HAVING COUNT(DISTINCT fiscal_year) >= 3
+                ORDER BY RANDOM()
+                LIMIT 2
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return ["삼성전자", "SK하이닉스", "셀트리온"]
+
+    suggestions = ["삼성전자", *(str(row[0]) for row in rows if row and row[0])]
+    return list(dict.fromkeys(suggestions))[:3]
+
+
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    # Definitions and account-composition questions do not require a company lookup.
+    if _is_financial_statement_concept_question(normalized):
+        return "finance_concept_tool"
 
     # Route stability/profitability ratios for specific companies or time-series to company_trend_tool
     if any(word in normalized for word in ["유동비율", "당좌비율", "현금비율", "부채비율", "자기자본비율", "이자보상비율", "roe", "roa"]):
@@ -608,6 +682,39 @@ def select_tool(question: str) -> str:
     if any(word in normalized for word in ["roe", "roa", "재무비율"]):
         return "financial_ratio_tool"
     return "rag_only"
+
+
+def _is_financial_statement_concept_question(normalized: str) -> bool:
+    concept_terms = [
+        "무엇",
+        "뭐",
+        "어떤 계정",
+        "필요한 계정",
+        "구성 계정",
+        "산식",
+        "공식",
+        "계산 방법",
+        "계산하는 데",
+        "계산하는데",
+        "차이",
+        "의미",
+        "정의",
+    ]
+    financial_terms = [
+        "영업이익",
+        "매출총이익",
+        "당기순이익",
+        "매출액",
+        "영업이익률",
+        "순이익률",
+        "재무제표 계정",
+    ]
+    company_context_terms = ["최근", "연도", "개년", "추이", "전망", "비교", "종목코드"]
+    return (
+        any(term in normalized for term in concept_terms)
+        and any(term in normalized for term in financial_terms)
+        and not any(term in normalized for term in company_context_terms)
+    )
 
 
 def _is_market_news_question(normalized: str) -> bool:

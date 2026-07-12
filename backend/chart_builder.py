@@ -347,10 +347,11 @@ def _build_rf_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any
         })
 
     company = calculation.get("company") or {}
+    forecast_label = calculation.get("forecast_label") or "다음 영업일"
     return {
         "type": "line",
         "title": f"{company.get('company_name', '기업')} 주가 및 RF 예측 전망",
-        "subtitle": "최근 15영업일 + 다음 영업일 예측",
+        "subtitle": f"최근 15영업일 + {forecast_label} 예측",
         "unit": "KRW_PRICE",
         "datasets": [
             {

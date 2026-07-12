@@ -84,7 +84,7 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
     if ratio_lines:
         steps.append("간단 분석: " + " | ".join(ratio_lines))
 
-    news_fetch_result = _try_fetch_company_news(company, question)
+    news_fetch_result = _try_fetch_company_news(company, question) if _should_fetch_company_news(question) else None
     external_references = []
     if news_fetch_result and news_fetch_result.get("status") == "ok":
         external_references = _news_documents_only(search_external_docs(_news_query(company["company_name"], question), company["company_name"], limit=10))[:5]
@@ -275,6 +275,31 @@ def _try_fetch_company_news(company: dict[str, Any], question: str) -> dict[str,
             "message": "뉴스 API 호출에 실패했습니다. 배포 환경의 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 설정과 외부 네트워크 연결을 확인해야 합니다.",
             "query": query,
         }
+
+
+def _should_fetch_company_news(question: str) -> bool:
+    lowered = question.lower()
+    return any(
+        token in lowered
+        for token in [
+            "뉴스",
+            "기사",
+            "이슈",
+            "시장 반응",
+            "업황",
+            "원인",
+            "이유",
+            "배경",
+            "호재",
+            "악재",
+            "전망",
+            "동향",
+            "잠정실적",
+            "분기실적",
+            "최신 분기",
+            "최근 분기",
+        ]
+    )
 
 
 def _news_query(company_name: str | None, question: str) -> str:

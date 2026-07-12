@@ -1,7 +1,9 @@
 import logging
 import os
+import random
 import smtplib
 import time
+from threading import Lock
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -121,6 +123,45 @@ class FeedbackEmailRequest(BaseModel):
 @app.get("/health")
 def health_check() -> dict:
     return {"status": "ok"}
+
+
+RECOMMENDED_QUESTION_TTL_SECONDS = 10 * 60
+RECOMMENDED_QUESTION_COUNT = 5
+RECOMMENDED_QUESTION_POOL = (
+    "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
+    "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
+    "셀트리온의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
+    "한화에어로스페이스의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
+    "LIG넥스원의 최근 3개년 주요 재무계정 추이를 분석해줘",
+    "에스엠의 최근 1년 주가 수익률과 변동성을 계산해줘",
+    "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
+    "삼성전자의 최근 5개년 PER 추이를 계산해줘",
+    "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
+    "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+)
+
+_cached_questions: list[str] = []
+_last_refreshed = 0.0
+_question_cache_lock = Lock()
+
+def _generate_guaranteed_questions() -> list[str]:
+    """Return only questions covered by existing data and routing paths."""
+    return random.sample(RECOMMENDED_QUESTION_POOL, RECOMMENDED_QUESTION_COUNT)
+
+
+@app.get("/api/recommended-questions")
+@app.get("/api/trending-questions", include_in_schema=False)
+def get_recommended_questions() -> dict:
+    global _cached_questions, _last_refreshed
+    now = time.monotonic()
+    with _question_cache_lock:
+        if not _cached_questions or now - _last_refreshed >= RECOMMENDED_QUESTION_TTL_SECONDS:
+            _cached_questions = _generate_guaranteed_questions()
+            _last_refreshed = now
+    return {
+        "questions": _cached_questions,
+        "refresh_interval_seconds": RECOMMENDED_QUESTION_TTL_SECONDS,
+    }
 
 
 import queue

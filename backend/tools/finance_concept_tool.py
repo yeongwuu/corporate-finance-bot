@@ -2,6 +2,21 @@ def explain_finance_concept(question: str) -> dict:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
 
+    if "영업이익" in normalized and any(
+        term in normalized for term in ["필요한", "계정", "계산", "산식", "공식", "무엇", "뭐"]
+    ):
+        return {
+            "status": "ok",
+            "summary": "영업이익은 매출액에서 매출원가와 판매비와관리비를 차감해 계산합니다.",
+            "steps": [
+                "매출총이익 = 매출액 - 매출원가",
+                "영업이익 = 매출총이익 - 판매비와관리비",
+                "따라서 영업이익 = 매출액 - 매출원가 - 판매비와관리비입니다.",
+                "주요 필요 계정은 매출액, 매출원가, 판매비와관리비입니다.",
+                "기타수익·기타비용, 금융수익·금융비용, 법인세비용은 일반적으로 영업이익 이후 단계에서 반영됩니다.",
+            ],
+        }
+
     if any(term in normalized for term in ["잉여현금흐름", "free cash flow", "fcf"]):
         return {
             "status": "ok",

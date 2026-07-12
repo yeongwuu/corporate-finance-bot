@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import ssl
 import urllib.request
 from datetime import date, timedelta
 from typing import Any
@@ -201,7 +202,7 @@ def _download_fallback_naver_price_data(
 def _fetch_naver_price_page(stock_code: str, page: int) -> list[dict[str, Any]]:
     url = f"https://finance.naver.com/item/sise_day.naver?code={stock_code}&page={page}"
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=10, context=_ssl_context()) as response:
         html = response.read().decode("euc-kr", errors="ignore")
 
     rows = []
@@ -222,6 +223,15 @@ def _fetch_naver_price_page(stock_code: str, page: int) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _ssl_context() -> ssl.SSLContext | None:
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return None
 
 
 def _extract_period(question: str) -> dict[str, Any]:
@@ -352,18 +362,27 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
     start_date = end_date - timedelta(days=int(duration_years * 365.25))
 
     ticker = _to_yahoo_ticker(company.stock_code, company.market)
+    naver_error = None
     try:
         frame = _download_naver_price_data(company.stock_code, start_date, end_date)
-        if frame.empty:
-            frame = _download_price_data(ticker, start_date, end_date)
     except Exception as exc:
-        return {
-            "status": "price_fetch_error",
-            "summary": f"{company.company_name}의 주가 데이터를 불러오지 못했습니다.",
-            "steps": [f"데이터 쿼리 오류: {exc}"],
-            "company": company.__dict__,
-            "ticker": ticker,
-        }
+        naver_error = exc
+        frame = pd.DataFrame()
+
+    if frame.empty:
+        try:
+            frame = _download_price_data(ticker, start_date, end_date)
+        except Exception as yahoo_error:
+            return {
+                "status": "price_fetch_error",
+                "summary": f"{company.company_name}의 주가 데이터를 불러오지 못했습니다.",
+                "steps": [
+                    f"네이버 금융 조회 오류: {naver_error or '데이터 없음'}",
+                    f"Yahoo Finance 조회 오류: {yahoo_error}",
+                ],
+                "company": company.__dict__,
+                "ticker": ticker,
+            }
 
     if frame.empty or len(frame) < 30:
         return {
@@ -417,13 +436,19 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
     model.fit(X, y)
 
     latest_close = float(frame.iloc[-1]["Close"])
-    latest_closes = frame["Close"].values[-20:]
-    lags = [latest_closes[-i] for i in range(1, 6)]
-    ma5 = np.mean(latest_closes[-5:])
-    ma20 = np.mean(latest_closes[-20:])
+    forecast_days = _forecast_horizon_days(question)
+    forecast_label = "다음주(5영업일)" if forecast_days == 5 else "다음 영업일"
+    rolling_closes = [float(value) for value in frame["Close"].values]
+    forecast_values = []
+    for _ in range(forecast_days):
+        lags = [rolling_closes[-i] for i in range(1, 6)]
+        ma5 = float(np.mean(rolling_closes[-5:]))
+        ma20 = float(np.mean(rolling_closes[-20:]))
+        predicted_close = float(model.predict(np.array([[*lags, ma5, ma20]]))[0])
+        forecast_values.append(predicted_close)
+        rolling_closes.append(predicted_close)
 
-    X_next = np.array([[*lags, ma5, ma20]])
-    predicted_next_close = float(model.predict(X_next)[0])
+    predicted_next_close = forecast_values[-1]
     pred_return = (predicted_next_close / latest_close - 1.0) * 100.0
 
     recent_closes = frame[["Close"]].tail(15).copy()
@@ -435,15 +460,17 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
             "close": float(close_row.Close),
             "forecast": False
         })
-    next_date_str = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
-    prices_list.append({
-        "date": next_date_str,
-        "close": predicted_next_close,
-        "forecast": True
-    })
+    last_date = frame.index[-1].date() if hasattr(frame.index[-1], "date") else date.today()
+    forecast_dates = _next_business_dates(last_date, forecast_days)
+    for forecast_date, forecast_close in zip(forecast_dates, forecast_values):
+        prices_list.append({
+            "date": forecast_date.isoformat(),
+            "close": forecast_close,
+            "forecast": True,
+        })
 
     summary = (
-        f"랜덤포레스트 회귀모델로 {company.company_name}의 다음 영업일 주가를 예측한 결과, "
+        f"랜덤포레스트 회귀모델로 {company.company_name}의 {forecast_label} 종가를 예측한 결과, "
         f"현재가 {_format_krw(latest_close)} 대비 **{pred_return:+.2f}%** 변동한 "
         f"**{_format_krw(predicted_next_close)}**으로 전망됩니다. (검증 셋 결정계수 $R^2$: {test_r2:.2f}, MAE: {_format_krw(test_mae)})"
     )
@@ -454,7 +481,7 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
         f"학습 알고리즘: RandomForestRegressor (sklearn, n_estimators=100)",
         f"사용 특징(Features): Lag 1~5일 종가, 5일 이동평균(MA5), 20일 이동평균(MA20)",
         f"검증 스코어: R2 결정계수 = {test_r2:.4f} / MAE = {_format_krw(test_mae)}",
-        f"다음 영업일 예측치: {_format_krw(predicted_next_close)} (현재가 {_format_krw(latest_close)} 대비 {pred_return:+.2f}% 변동 예상)"
+        f"{forecast_label} 최종 예측치: {_format_krw(predicted_next_close)} (현재가 {_format_krw(latest_close)} 대비 {pred_return:+.2f}% 변동 예상)"
     ]
 
     return {
@@ -467,7 +494,24 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
         "latest_close": latest_close,
         "predicted_next_close": predicted_next_close,
         "pred_return": pred_return,
+        "forecast_days": forecast_days,
+        "forecast_label": forecast_label,
         "test_r2": test_r2,
         "test_mae": test_mae,
         "prices_list": prices_list
     }
+
+
+def _forecast_horizon_days(question: str) -> int:
+    compact = question.replace(" ", "").lower()
+    return 5 if any(term in compact for term in ["다음주", "향후1주", "일주일", "1주일"]) else 1
+
+
+def _next_business_dates(start: date, count: int) -> list[date]:
+    dates = []
+    candidate = start
+    while len(dates) < count:
+        candidate += timedelta(days=1)
+        if candidate.weekday() < 5:
+            dates.append(candidate)
+    return dates

@@ -2,6 +2,7 @@ fastapi
 uvicorn
 pydantic
 pandas
+scikit-learn
 openpyxl
 certifi
 yfinance

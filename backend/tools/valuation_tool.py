@@ -10,7 +10,7 @@ from tools.stock_price_tool import _download_naver_price_data, _download_price_d
 
 def analyze_valuation(question: str) -> dict:
     market_trend = calculate_market_ratio_trend(question)
-    if market_trend["status"] in {"ok", "missing_shares", "price_fetch_error"}:
+    if market_trend["status"] in {"ok", "needs_company", "missing_data", "no_data", "missing_shares", "price_fetch_error"}:
         return market_trend
 
     if "유보율" in question and "per" in question.lower() and "pbr" in question.lower() and "roe" in question.lower():

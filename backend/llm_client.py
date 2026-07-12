@@ -16,9 +16,7 @@ PROJECT_ROOT = BACKEND_ROOT.parent
 
 def build_final_answer(question: str, tool_name: str, calculation: dict, references: list[dict]) -> str:
     if calculation.get("status") == "needs_company":
-        if "추이" in question or "5개년" in question or "개년" in question or "기간" in question:
-            return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주시면 최근 재무계정 추이를 분석해 드리겠습니다."
-        return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주시면 자세히 조회해 드리겠습니다."
+        return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주세요."
 
     if calculation.get("status") == "no_data":
         company = calculation.get("company") or {}
@@ -192,6 +190,7 @@ def build_rf_stock_forecast_answer(calculation: dict) -> str:
     latest_close = calculation.get("latest_close") or 0.0
     predicted_next_close = calculation.get("predicted_next_close") or 0.0
     pred_return = calculation.get("pred_return") or 0.0
+    forecast_label = calculation.get("forecast_label") or "다음 영업일"
     test_r2 = calculation.get("test_r2") or 0.0
     test_mae = calculation.get("test_mae") or 0.0
 
@@ -200,17 +199,29 @@ def build_rf_stock_forecast_answer(calculation: dict) -> str:
     lines = [
         f"🤖 **랜덤포레스트 회귀(Random Forest Regressor) 기반 주가 예측 결과**",
         f"",
-        f"**{company_name}**의 과거 주가 시계열 데이터를 기계학습 모델에 학습시켜 다음 영업일 종가를 예측한 결과입니다.",
+        f"**{company_name}**의 과거 주가 시계열 데이터를 기계학습 모델에 학습시켜 {forecast_label} 종가를 예측한 결과입니다.",
         f"",
         f"*   **최신 종가 (현재가)**: {_format_krw(latest_close)}",
-        f"*   **예측 종가 (다음 영업일)**: **{_format_krw(predicted_next_close)}** (변동 예상치: **{pred_return:+.2f}%**)",
+        f"*   **예측 종가 ({forecast_label})**: **{_format_krw(predicted_next_close)}** (변동 예상치: **{pred_return:+.2f}%**)",
         f"",
         f"📊 **모델 검증 지표 (Model Validation Metrics)**",
         f"*   **결정계수 ($R^2$ Score)**: `{test_r2:.4f}` (1.0에 가까울수록 과거 학습 성능이 높음을 의미)",
         f"*   **평균절대오차 (MAE)**: `{_format_krw(test_mae)}` (실제 가격 대비 평균 예측 오차 수준)",
-        f"",
-        f"💡 *이 예측 결과는 과거 일간 가격 변동 패턴(Lag 1~5, MA5, MA20)만을 고려한 기계학습 추세 추정치입니다. 실제 주가는 거시 경제 변수, 기업 이슈, 시장 수급 등에 의해 다르게 움직일 수 있으므로 투자 판단의 참고용으로만 활용해 주시기 바랍니다.*"
     ]
+    if test_r2 < 0:
+        lines.extend(
+            [
+                "",
+                "⚠️ **검증 주의**: 결정계수가 0보다 낮아 단순 평균 예측보다도 검증 성능이 낮습니다. "
+                "위 수치는 실험적 추정치이며 다음 주 방향성 판단이나 투자 의사결정에 사용하기 어렵습니다.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "💡 *이 예측 결과는 과거 일간 가격 변동 패턴(Lag 1~5, MA5, MA20)만을 고려한 기계학습 추세 추정치입니다. 실제 주가는 거시 경제 변수, 기업 이슈, 시장 수급 등에 의해 다르게 움직일 수 있으므로 투자 판단의 참고용으로만 활용해 주시기 바랍니다.*",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -371,7 +382,10 @@ def build_company_comparison_answer(calculation: dict) -> str:
     comparison = calculation.get("comparison") or []
     if not comparison:
         return calculation.get("summary") or "비교할 기업 데이터를 찾지 못했습니다."
-    lines = ["질문에 나온 순서대로 각 기업을 먼저 계산한 뒤 비교했습니다."]
+    if calculation.get("mode") == "representative_sector_comparison":
+        lines = [calculation.get("summary") or "대표 기업의 재무 지표를 비교했습니다."]
+    else:
+        lines = ["질문에 나온 순서대로 각 기업을 먼저 계산한 뒤 비교했습니다."]
     for index, item in enumerate(comparison, start=1):
         company = item.get("company") or {}
         period = item.get("period") or {}
@@ -398,10 +412,15 @@ def build_company_comparison_answer(calculation: dict) -> str:
                 lines.append("수익성 비율 계산에 필요한 매출액, 영업이익 또는 당기순이익 데이터가 부족합니다.")
         elif item.get("metrics"):
             for metric in item["metrics"]:
-                lines.append(
-                    f"{metric['label']}: {metric['start_year']}년 {_format_display_amount(metric['start_amount'])} -> "
-                    f"{metric['end_year']}년 {_format_display_amount(metric['end_amount'])}"
-                )
+                if metric["start_year"] == metric["end_year"]:
+                    lines.append(
+                        f"{metric['label']}: {metric['end_year']}년 {_format_display_amount(metric['end_amount'])}"
+                    )
+                else:
+                    lines.append(
+                        f"{metric['label']}: {metric['start_year']}년 {_format_display_amount(metric['start_amount'])} -> "
+                        f"{metric['end_year']}년 {_format_display_amount(metric['end_amount'])}"
+                    )
     lines.append("비교 결과는 보유 재무제표 기준이며, 투자 추천이나 목표주가 의견은 아닙니다.")
     return "\n".join(lines)
 
