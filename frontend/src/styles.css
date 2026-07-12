@@ -1,10 +1,10 @@
 :root {
   color: #182026;
   background: #f5f2ee;
-  --accent: #a65e3d;
-  --accent-dark: #874a2f;
-  --accent-soft: #f7ebe4;
-  --accent-border: #d3b5a7;
+  --accent: #d04a02;
+  --accent-dark: #a63a00;
+  --accent-soft: #fff2e8;
+  --accent-border: #f0b58d;
   --danger: #b33a2b;
   --surface: #ffffff;
   --surface-muted: #fbf8f5;
@@ -196,10 +196,10 @@ h2 {
   padding: 10px 20px;
   border-radius: 24px;
   border-bottom-right-radius: 4px;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
-  box-shadow: 0 4px 16px rgba(208, 74, 2, 0.1);
+  background: #ffe4d6;
+  border-color: #ffd0b8;
+  color: #85370d;
+  box-shadow: 0 4px 16px rgba(196, 100, 55, 0.05);
 }
 
 .message.assistant {
@@ -399,9 +399,7 @@ h2 {
 .loading-trace {
   display: flex;
   flex-direction: column;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--accent-border);
+  margin-top: 8px;
 }
 
 .loading-trace div {
@@ -1281,5 +1279,15 @@ h2 {
   .capsule-input {
     font-size: 13.5px;
   }
+}
+
+.recommend-refresh-btn:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: rotate(45deg);
+}
+
+.recommended-sidebar {
+  will-change: transform;
 }
 

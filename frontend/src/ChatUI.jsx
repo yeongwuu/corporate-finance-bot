@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 
@@ -37,6 +37,22 @@ export default function ChatUI() {
   const [loadingStartedAt, setLoadingStartedAt] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [activeStep, setActiveStep] = useState(0);
+  const [displayedActiveStep, setDisplayedActiveStep] = useState(0);
+  const [stepTexts, setStepTexts] = useState(["질문의 의도와 맥락을 해석하고 있습니다."]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setDisplayedActiveStep(0);
+      return;
+    }
+    if (displayedActiveStep < activeStep) {
+      const timer = setTimeout(() => {
+        setDisplayedActiveStep((prev) => prev + 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeStep, displayedActiveStep, isLoading]);
+
   const [pendingFeedback, setPendingFeedback] = useState(null);
   const [feedbackNotice, setFeedbackNotice] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
@@ -44,6 +60,26 @@ export default function ChatUI() {
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const recommendedSidebarRef = useRef(null);
+
+  useEffect(() => {
+    let requestRef;
+    let currentY = window.scrollY;
+
+    const updateElasticScroll = () => {
+      const targetY = window.scrollY;
+      currentY += (targetY - currentY) * 0.09;
+
+      if (recommendedSidebarRef.current) {
+        const offset = (currentY - targetY) * 0.15;
+        recommendedSidebarRef.current.style.transform = `translateY(${offset}px)`;
+      }
+      requestRef = requestAnimationFrame(updateElasticScroll);
+    };
+
+    requestRef = requestAnimationFrame(updateElasticScroll);
+    return () => cancelAnimationFrame(requestRef);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -53,27 +89,28 @@ export default function ChatUI() {
   const canSubmit = (input.trim().length > 0 || Boolean(attachedFile)) && !isLoading;
   const isInitialState = messages.filter((m) => m.role === "user").length === 0;
 
-  useEffect(() => {
-    const fetchRecommendedQuestions = async () => {
-      for (const path of ["/api/recommended-questions", "/api/trending-questions"]) {
-        try {
-          const response = await fetch(`${API_URL}${path}`);
-          if (!response.ok) continue;
-          const data = await response.json();
-          if (Array.isArray(data.questions) && data.questions.length > 0) {
-            setRecommendedQuestions(data.questions.slice(0, 5));
-            return;
-          }
-        } catch (error) {
-          console.warn(`Failed to fetch recommended questions from ${path}`, error);
+  const fetchRecommendedQuestions = useCallback(async () => {
+    for (const path of ["/api/recommended-questions", "/api/trending-questions"]) {
+      try {
+        const response = await fetch(`${API_URL}${path}`);
+        if (!response.ok) continue;
+        const data = await response.json();
+        if (Array.isArray(data.questions) && data.questions.length > 0) {
+          setRecommendedQuestions(data.questions.slice(0, 5));
+          return;
         }
+      } catch (error) {
+        console.warn(`Failed to fetch recommended questions from ${path}`, error);
       }
-      setRecommendedQuestions(buildFallbackRecommendedQuestions());
-    };
+    }
+    setRecommendedQuestions(buildFallbackRecommendedQuestions());
+  }, []);
+
+  useEffect(() => {
     fetchRecommendedQuestions();
     const interval = window.setInterval(fetchRecommendedQuestions, 600000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchRecommendedQuestions]);
 
   useEffect(() => {
     if (!isLoading || !loadingStartedAt) {
@@ -125,6 +162,8 @@ export default function ChatUI() {
     }
     setLoadingStartedAt(Date.now());
     setActiveStep(0);
+    setDisplayedActiveStep(0);
+    setStepTexts(["질문의 의도와 맥락을 해석하고 있습니다."]);
     setIsLoading(true);
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -169,6 +208,13 @@ export default function ChatUI() {
 
         if (eventName === "step") {
           setActiveStep(parsed.step_index);
+          if (parsed.message) {
+            setStepTexts((prev) => {
+              const next = [...prev];
+              next[parsed.step_index] = parsed.message;
+              return next;
+            });
+          }
         } else if (eventName === "result") {
           data = parsed;
         } else if (eventName === "error") {
@@ -338,6 +384,33 @@ export default function ChatUI() {
                   ))}
                 </div>
               </div>
+              <div className="recommend-refresh-container" style={{ display: 'flex', justifyContent: 'center', marginTop: '16px', marginBottom: '8px' }}>
+                <button
+                  type="button"
+                  className="recommend-refresh-btn"
+                  onClick={fetchRecommendedQuestions}
+                  disabled={isLoading}
+                  title="질문 재생성"
+                  data-tooltip="질문 재생성"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    transition: 'border-color 160ms, color 160ms'
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <form
@@ -384,16 +457,23 @@ export default function ChatUI() {
                   title="문제를 업로드하세요!"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
                 >
-                  📎
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
                 </button>
                 <button
                   type="submit"
                   className="capsule-send-btn"
                   disabled={!canSubmit}
                   title="전송"
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
                 >
-                  ✈️
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
                 </button>
               </div>
             </form>
@@ -413,15 +493,14 @@ export default function ChatUI() {
 
           {isLoading ? (
             <article className="message assistant loading">
-              <div className="message-loading-header">
+              <div className="message-loading-header" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
                 <span className="loading-status">
                   <span aria-hidden="true" className="hourglass">⌛</span>
                   <span>{elapsedSeconds}s</span>
                   <span>working</span>
                 </span>
               </div>
-              <p>질문을 분석하고 필요한 데이터를 조회하는 중입니다.</p>
-              <LoadingTrace activeStep={activeStep} />
+              <LoadingTrace activeStep={displayedActiveStep} stepTexts={stepTexts} />
             </article>
           ) : null}
           <div ref={messagesEndRef} />
@@ -487,7 +566,7 @@ export default function ChatUI() {
         </form>
       </section>
 
-      <aside className="recommended-sidebar" aria-label="추천 질문">
+      <aside ref={recommendedSidebarRef} className="recommended-sidebar" aria-label="추천 질문">
         <div className="recommended-header">
           <span className="recommended-icon" aria-hidden="true">💡</span>
           <strong>이런 질문은 어떠세요?</strong>
@@ -612,9 +691,15 @@ function MessageText({ message, onAskSuggestion }) {
             aria-label="좋아요"
             title="좋아요"
           >
-            {"\uD83D\uDC4D\uFE0E"}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', display: 'inline-block' }}>
+              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+            </svg>
             {feedbackBurst?.value === "up" ? (
-              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">{"\uD83D\uDC4D\uFE0E"}</span>
+              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                </svg>
+              </span>
             ) : null}
           </button>
           <button
@@ -624,9 +709,15 @@ function MessageText({ message, onAskSuggestion }) {
             aria-label="비추천"
             title="비추천"
           >
-            {"\uD83D\uDC4E\uFE0E"}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', display: 'inline-block' }}>
+              <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm12-3h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+            </svg>
             {feedbackBurst?.value === "down" ? (
-              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">{"\uD83D\uDC4E\uFE0E"}</span>
+              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm12-3h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+                </svg>
+              </span>
             ) : null}
           </button>
         </div>
@@ -679,14 +770,8 @@ function SourcePanel({ references }) {
   );
 }
 
-function LoadingTrace({ activeStep }) {
-  const steps = [
-    "질문 의도와 맥락을 해석하고 있습니다.",
-    "필요한 재무제표, 뉴스, 공시 또는 주가 데이터를 고르고 있습니다.",
-    "계산 툴에서 지표와 비교 대상을 처리하고 있습니다.",
-    "답변에 필요한 그래프와 핵심 문장을 정리하고 있습니다.",
-  ];
-  const currentStepText = steps[activeStep] || steps[steps.length - 1];
+function LoadingTrace({ activeStep, stepTexts }) {
+  const currentStepText = stepTexts?.[activeStep] || stepTexts?.[stepTexts.length - 1] || "질문의 의도와 맥락을 해석하고 있습니다.";
   return (
     <div className="loading-trace" aria-label="실시간 처리 과정">
       <div className="active">
@@ -1096,12 +1181,37 @@ function MathFormula({ expression, displayMode }) {
   }
 }
 
+function buildDynamicChartTitle(chart) {
+  if (!chart.datasets || chart.datasets.length === 0) return chart.title || "재무 추이";
+  const labels = chart.datasets.map((d) => d.label || "");
+  if (labels.length === 1) {
+    return `${labels[0]} 추이`;
+  }
+  const hasRevenue = labels.some((l) => l.includes("매출"));
+  const hasOperatingIncome = labels.some((l) => l.includes("영업이익"));
+  const hasNetIncome = labels.some((l) => l.includes("순이익") || l.includes("순손실") || l.includes("당기순"));
+  if (hasOperatingIncome && !hasRevenue && !hasNetIncome) {
+    return "영업이익 추이";
+  }
+  if (hasRevenue && !hasOperatingIncome && !hasNetIncome) {
+    return "매출액 추이";
+  }
+  if (hasNetIncome && !hasRevenue && !hasOperatingIncome) {
+    return "당기순이익 추이";
+  }
+  if (chart.title && chart.title !== "재무 추이" && chart.title !== "실적 추이") {
+    return chart.title;
+  }
+  return "주요 재무지표 추이";
+}
+
 function ChartPanel({ chart, compact = false }) {
   if (!chart) return null;
+  const dynamicTitle = buildDynamicChartTitle(chart);
   return (
     <section className={`chart-card${compact ? " compact" : ""}`}>
       <div className="chart-title">
-        <strong>{chart.title}</strong>
+        <strong>{dynamicTitle}</strong>
         {chart.subtitle ? <span>{chart.subtitle}</span> : null}
       </div>
       {chart.type === "line" ? <LineChart chart={chart} /> : null}

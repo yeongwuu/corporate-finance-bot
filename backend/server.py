@@ -286,8 +286,8 @@ def chat(request: ChatRequest) -> StreamingResponse:
 
     def run_agent():
         try:
-            def on_step(step_index: int):
-                q.put(f"event: step\ndata: {json.dumps({'step_index': step_index})}\n\n")
+            def on_step(step_index: int, message: str | None = None):
+                q.put(f"event: step\ndata: {json.dumps({'step_index': step_index, 'message': message}, ensure_ascii=False)}\n\n")
 
             res = answer_finance_question(
                 question=request.question,

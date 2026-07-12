@@ -25,7 +25,7 @@ def answer_finance_question(
     question: str,
     history: list[dict] | None = None,
     attachment: dict | None = None,
-    on_step: Callable[[int], None] | None = None,
+    on_step: Callable[[int, str | None], None] | None = None,
 ) -> dict:
     started_at = time.perf_counter()
     trace = []
@@ -42,21 +42,22 @@ def answer_finance_question(
     effective_question = clarification_question or _with_context(question, context_text)
 
     if on_step:
-        on_step(0)
+        on_step(0, "질문의 의도와 맥락을 해석하고 있습니다.")
 
     step_started = time.perf_counter()
     tool_name = select_tool(effective_question)
-    trace.append(_trace_item("분석 도구 선택", _tool_description(tool_name), step_started))
+    tool_desc = _tool_description(tool_name)
+    trace.append(_trace_item("분석 도구 선택", tool_desc, step_started))
 
     if on_step:
-        on_step(1)
+        on_step(1, f"분석 도구로 [{tool_desc}]를 준비하고 있습니다.")
 
     step_started = time.perf_counter()
     knowledge_references = search_knowledge(effective_question)
     trace.append(_trace_item("재무 지식 검색", f"관련 기준 문서 {len(knowledge_references)}건을 확인했습니다.", step_started))
 
     if on_step:
-        on_step(2)
+        on_step(2, f"[{tool_desc}]를 가동하여 재무 데이터를 추출하고 분석하는 중입니다.")
 
     step_started = time.perf_counter()
     calculation = run_tool(tool_name, effective_question)
@@ -67,7 +68,7 @@ def answer_finance_question(
         calculation["conversation_context"] = context_text
 
     if on_step:
-        on_step(3)
+        on_step(3, "데이터 분석 결과를 정리하여 최적의 그래프와 답변 문장을 작성하고 있습니다.")
 
     step_started = time.perf_counter()
     references = _combined_references(calculation, knowledge_references)
