@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import re
 import smtplib
 import time
 from datetime import datetime

@@ -217,15 +217,6 @@ export default function ChatUI() {
           },
         },
       ]);
-      if (shouldAskFeedbackConsent(data, answer)) {
-        setPendingFeedback({
-          question: displayQuestion,
-          attachmentName: attachment?.name,
-          answer,
-          tool: data.tool,
-          status: data.calculation?.status,
-        });
-      }
     } catch (error) {
       const answer =
         error.name === "AbortError"
@@ -305,14 +296,14 @@ export default function ChatUI() {
     <main className="app-shell">
       <aside className="sidebar">
         <div>
-          <p className="eyebrow">Corporate Finance Bot</p>
+          {!isInitialState && <p className="eyebrow">Corporate Finance Bot</p>}
         </div>
       </aside>
 
       {isInitialState ? (
         <section className="initial-hero-panel">
           <div className="initial-hero-container">
-            <h1 className="hero-logo-title">🏦 Corporate Finance Bot</h1>
+            <h1 className="hero-logo-title">Corporate Finance Bot</h1>
             
             <div className="initial-recommend-section">
               <div className="recommend-title">
@@ -389,9 +380,10 @@ export default function ChatUI() {
                 <button
                   type="button"
                   className="capsule-attach-btn"
+                  data-tooltip="문제를 업로드하세요!"
+                  title="문제를 업로드하세요!"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
-                  title="파일 업로드"
                 >
                   📎
                 </button>
@@ -401,7 +393,7 @@ export default function ChatUI() {
                   disabled={!canSubmit}
                   title="전송"
                 >
-                  🚀
+                  ✈️
                 </button>
               </div>
             </form>
@@ -411,19 +403,17 @@ export default function ChatUI() {
         <>
           <section className="chat-panel" aria-label="채팅">
         <div className="message-list">
-          {messages.map((message, index) => (
-            <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-              <div className="message-header">
-                <strong>{message.role === "user" ? "User" : "Assistant"}</strong>
-              </div>
-              <MessageText message={message} onAskSuggestion={sendMessage} />
-            </article>
-          ))}
+          {messages
+            .filter((msg, idx) => !(idx === 0 && msg.role === "assistant"))
+            .map((message, index) => (
+              <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
+                <MessageText message={message} onAskSuggestion={sendMessage} />
+              </article>
+            ))}
 
           {isLoading ? (
             <article className="message assistant loading">
-              <div className="message-header">
-                <strong>Assistant</strong>
+              <div className="message-loading-header">
                 <span className="loading-status">
                   <span aria-hidden="true" className="hourglass">⌛</span>
                   <span>{elapsedSeconds}s</span>
@@ -530,30 +520,6 @@ export default function ChatUI() {
           {feedbackNotice}
         </div>
       ) : null}
-      {pendingFeedback ? (
-        <div className="consent-backdrop" role="presentation">
-          <section className="consent-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-consent-title">
-            <h2 id="feedback-consent-title">답변 개선을 위해 내용을 전송할까요?</h2>
-            <p>
-              이 질문은 챗봇이 충분히 분석하지 못한 것으로 보입니다. 질문과 답변 내용을 개발자 이메일로 보내
-              개선에 활용해도 될까요?
-            </p>
-            <div className="consent-preview">
-              <strong>전송 내용</strong>
-              <p>{buildPreview(pendingFeedback.question)}</p>
-              <p>{buildPreview(pendingFeedback.answer)}</p>
-            </div>
-            <div className="consent-actions">
-              <button type="button" onClick={dismissFeedbackEmail} disabled={isSendingFeedback}>
-                아니요
-              </button>
-              <button type="button" className="primary" onClick={submitFeedbackEmail} disabled={isSendingFeedback}>
-                {isSendingFeedback ? "전송 중" : "동의하고 전송"}
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
     </main>
   );
 }
@@ -637,7 +603,7 @@ function MessageText({ message, onAskSuggestion }) {
             {isFolded ? "펼치기" : "접기"}
           </button>
           <button type="button" onClick={copyMessage} aria-label="답변 복사" title="답변 복사">
-            {copied ? "Copied" : "Copy"}
+            {copied ? "복사 완료" : "복사"}
           </button>
           <button
             type="button"
@@ -646,9 +612,9 @@ function MessageText({ message, onAskSuggestion }) {
             aria-label="좋아요"
             title="좋아요"
           >
-            👍
+            {"\uD83D\uDC4D\uFE0E"}
             {feedbackBurst?.value === "up" ? (
-              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">👍</span>
+              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">{"\uD83D\uDC4D\uFE0E"}</span>
             ) : null}
           </button>
           <button
@@ -658,9 +624,9 @@ function MessageText({ message, onAskSuggestion }) {
             aria-label="비추천"
             title="비추천"
           >
-            👎
+            {"\uD83D\uDC4E\uFE0E"}
             {feedbackBurst?.value === "down" ? (
-              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">👎</span>
+              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">{"\uD83D\uDC4E\uFE0E"}</span>
             ) : null}
           </button>
         </div>
@@ -720,14 +686,12 @@ function LoadingTrace({ activeStep }) {
     "계산 툴에서 지표와 비교 대상을 처리하고 있습니다.",
     "답변에 필요한 그래프와 핵심 문장을 정리하고 있습니다.",
   ];
+  const currentStepText = steps[activeStep] || steps[steps.length - 1];
   return (
     <div className="loading-trace" aria-label="실시간 처리 과정">
-      {steps.map((step, index) => (
-        <div key={step} className={index <= activeStep ? "active" : undefined}>
-          <span>{index + 1}</span>
-          <p>{step}</p>
-        </div>
-      ))}
+      <div className="active">
+        <p className="loading-step-text">{currentStepText}</p>
+      </div>
     </div>
   );
 }
