@@ -486,12 +486,12 @@ export default function ChatUI() {
             .filter((msg, idx) => !(idx === 0 && msg.role === "assistant"))
             .map((message, index) => (
               <div key={`${message.role}-${index}`} className="message-container" style={{ display: 'flex', flexDirection: 'column', width: '100%', marginBottom: '12px' }}>
-                {message.role === "assistant" && message.timestamp && (
+                {message.role === "user" && message.timestamp && (
                   <span className="message-time-label" style={{
                     fontSize: '13px',
                     color: 'var(--text-muted)',
-                    alignSelf: 'center',
-                    margin: '5px 0 4px',
+                    alignSelf: 'flex-end',
+                    margin: '5px 10px 4px 0',
                   }}>
                     {message.timestamp}
                   </span>
@@ -1542,8 +1542,22 @@ function formatChartValue(value, unit) {
   return value.toFixed(0);
 }
 
+function buildBarColorPalette(count) {
+  const size = Math.max(1, count);
+  if (size === 1) return ["#FF530A"];
+  const start = [0xFD, 0xF0, 0xE6];
+  const end = [0xFF, 0x53, 0x0A];
+  return Array.from({ length: size }, (_, index) => {
+    const ratio = index / (size - 1);
+    const rgb = start.map((channel, channelIndex) => Math.round(channel + (end[channelIndex] - channel) * ratio));
+    return `#${rgb.map((channel) => channel.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  });
+}
+
 function BarChart({ chart }) {
-  const option = useMemo(() => ({
+  const option = useMemo(() => {
+    const colors = buildBarColorPalette(chart.bars.length);
+    return {
     animationDuration: 650,
     animationEasing: "cubicOut",
     aria: { enabled: true },
@@ -1571,21 +1585,22 @@ function BarChart({ chart }) {
     series: [{
       type: "bar",
       barMaxWidth: 24,
-      data: chart.bars.map((bar) => ({
+      data: chart.bars.map((bar, index) => ({
         value: Number(bar.value),
         display: bar.display,
-        itemStyle: { color: Number(bar.value) < 0 ? "#b85c4b" : "#F2550A", borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
+        itemStyle: { color: colors[index], borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
         label: { show: true, position: Number(bar.value) < 0 ? "left" : "right", color: "#27323a", fontSize: 10, fontWeight: 700, formatter: bar.display },
       })),
     }],
-  }), [chart]);
+    };
+  }, [chart]);
   return <EChart option={option} ariaLabel={chart.title || "재무 비교 막대그래프"} height={Math.max(230, chart.bars.length * 42)} />;
 }
 
 function CompactMetricBarChart({ chart }) {
   const option = useMemo(() => {
-    const colors = ["#F2550A", "#e59a2f"];
     const metricCount = Math.max(1, chart.metrics.length);
+    const colors = buildBarColorPalette(metricCount);
     const gap = metricCount === 1 ? 0 : 4;
     const gridWidth = (92 - gap * (metricCount - 1)) / metricCount;
     const grids = chart.metrics.map((_, index) => ({
@@ -1633,10 +1648,10 @@ function CompactMetricBarChart({ chart }) {
         xAxisIndex: index,
         yAxisIndex: index,
         barMaxWidth: 34,
-        data: metric.values.map((item, valueIndex) => ({
+        data: metric.values.map((item) => ({
           value: item.value,
           display: item.display,
-          itemStyle: { color: colors[valueIndex % colors.length], borderRadius: [6, 6, 0, 0] },
+          itemStyle: { color: colors[index % colors.length], borderRadius: [6, 6, 0, 0] },
           label: { show: true, position: "top", color: "#27323a", fontSize: 9, fontWeight: 700, formatter: item.display },
         })),
       })),
