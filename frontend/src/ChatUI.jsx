@@ -483,12 +483,12 @@ export default function ChatUI() {
             .filter((msg, idx) => !(idx === 0 && msg.role === "assistant"))
             .map((message, index) => (
               <div key={`${message.role}-${index}`} className="message-container" style={{ display: 'flex', flexDirection: 'column', width: '100%', marginBottom: '12px' }}>
-                {message.timestamp && (
+                {message.role === "assistant" && message.timestamp && (
                   <span className="message-time-label" style={{
-                    fontSize: '11px',
+                    fontSize: '13px',
                     color: 'var(--text-muted)',
-                    alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start',
-                    margin: '4px 12px 2px',
+                    alignSelf: 'center',
+                    margin: '5px 0 4px',
                   }}>
                     {message.timestamp}
                   </span>
@@ -556,7 +556,7 @@ export default function ChatUI() {
             disabled={isLoading}
             style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'end' }}
           >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
@@ -567,15 +567,15 @@ export default function ChatUI() {
             onClick={isLoading ? cancelMessage : undefined}
             data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다!"}
             aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end', marginLeft: '8px' }}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end' }}
           >
             {isLoading ? (
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             ) : (
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translate(1px, -1px)' }}>
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
@@ -756,11 +756,10 @@ function MessageText({ message, onAskSuggestion }) {
             title="답변 복사"
             style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
-            <span>{copied ? "복사 완료" : "복사"}</span>
           </button>
           <button
             type="button"
@@ -769,14 +768,13 @@ function MessageText({ message, onAskSuggestion }) {
             title="링크 공유"
             style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" />
               <circle cx="6" cy="12" r="3" />
               <circle cx="18" cy="19" r="3" />
               <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
               <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </svg>
-            <span>{shared ? "링크 복사 완료" : "링크공유"}</span>
           </button>
         </div>
       ) : null}
@@ -1386,6 +1384,7 @@ function ChartPanel({ chart, compact = false }) {
       </div>
       {chart.type === "line" ? <LineChart chart={chart} /> : null}
       {chart.type === "bar" ? <BarChart chart={chart} /> : null}
+      {chart.type === "compact_metric_bar" ? <CompactMetricBarChart chart={chart} /> : null}
       {chart.range ? (
         <div className="forecast-range" aria-label="전망 범위">
           <span>보수 {chart.range.low}</span>
@@ -1538,6 +1537,69 @@ function BarChart({ chart }) {
     }],
   }), [chart]);
   return <EChart option={option} ariaLabel={chart.title || "재무 비교 막대그래프"} height={Math.max(230, chart.bars.length * 42)} />;
+}
+
+function CompactMetricBarChart({ chart }) {
+  const option = useMemo(() => {
+    const colors = ["#F2550A", "#e59a2f"];
+    const metricCount = Math.max(1, chart.metrics.length);
+    const gap = metricCount === 1 ? 0 : 4;
+    const gridWidth = (92 - gap * (metricCount - 1)) / metricCount;
+    const grids = chart.metrics.map((_, index) => ({
+      left: `${4 + index * (gridWidth + gap)}%`,
+      width: `${gridWidth}%`,
+      top: 20,
+      bottom: 58,
+    }));
+    const xAxes = chart.metrics.map((metric, index) => ({
+      type: "category",
+      gridIndex: index,
+      data: metric.values.map((item) => `${item.year}년`),
+      name: metric.label,
+      nameLocation: "middle",
+      nameGap: 30,
+      nameTextStyle: { color: "#27323a", fontSize: 12, fontWeight: 700 },
+      axisLine: { lineStyle: { color: "#d8cec5" } },
+      axisTick: { show: false },
+      axisLabel: { color: "#6f625b", fontSize: 10 },
+    }));
+    const yAxes = chart.metrics.map((_, index) => ({
+      type: "value",
+      gridIndex: index,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: "#796b63", fontSize: 9, formatter: (value) => formatChartValue(Number(value), chart.unit) },
+      splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
+    }));
+    return {
+      animationDuration: 650,
+      aria: { enabled: true },
+      grid: grids,
+      tooltip: {
+        trigger: "item",
+        backgroundColor: "rgba(255,255,255,.97)",
+        borderColor: "#e1d4ca",
+        textStyle: { color: "#27323a", fontSize: 12 },
+        formatter: (params) => `${params.name}<br/>${params.marker}${params.seriesName}: <b>${params.data.display}</b>`,
+      },
+      xAxis: xAxes,
+      yAxis: yAxes,
+      series: chart.metrics.map((metric, index) => ({
+        name: metric.label,
+        type: "bar",
+        xAxisIndex: index,
+        yAxisIndex: index,
+        barMaxWidth: 34,
+        data: metric.values.map((item, valueIndex) => ({
+          value: item.value,
+          display: item.display,
+          itemStyle: { color: colors[valueIndex % colors.length], borderRadius: [6, 6, 0, 0] },
+          label: { show: true, position: "top", color: "#27323a", fontSize: 9, fontWeight: 700, formatter: item.display },
+        })),
+      })),
+    };
+  }, [chart]);
+  return <EChart option={option} ariaLabel={chart.title || "소규모 재무 데이터 막대그래프"} height={290} />;
 }
 
 function EChart({ option, ariaLabel, height = 280 }) {

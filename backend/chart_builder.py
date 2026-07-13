@@ -20,6 +20,8 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
+    if calculation.get("mode") in {"advanced_dcf", "monte_carlo_comparison", "macro_scenario"}:
+        return _build_advanced_analysis_chart(calculation)
     if calculation.get("mode") == "stock_price_comparison":
         return _build_stock_price_comparison_chart(calculation)
     if calculation.get("mode") == "portfolio_optimization":
@@ -77,6 +79,14 @@ def _build_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
 
     company = calculation.get("company") or {}
     period = calculation.get("period") or {}
+    if _should_use_compact_bar(datasets):
+        return {
+            "type": "compact_metric_bar",
+            "title": f"{company.get('company_name', '기업')} 재무지표 비교",
+            "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
+            "unit": "KRW",
+            "metrics": _datasets_to_bar_metrics(datasets),
+        }
     return {
         "type": "line",
         "title": f"{company.get('company_name', '기업')} 재무 추이",
@@ -122,6 +132,14 @@ def _build_ratio_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
 
     company = calculation.get("company") or {}
     period = calculation.get("period") or {}
+    if _should_use_compact_bar(datasets):
+        return {
+            "type": "compact_metric_bar",
+            "title": f"{company.get('company_name', '기업')} 수익성 비율 비교",
+            "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
+            "unit": "PERCENT",
+            "metrics": _datasets_to_bar_metrics(datasets),
+        }
     return {
         "type": "line",
         "title": f"{company.get('company_name', '기업')} 수익성 비율 추이",
@@ -129,6 +147,31 @@ def _build_ratio_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
         "unit": "PERCENT",
         "datasets": datasets,
     }
+
+
+def _should_use_compact_bar(datasets: list[dict[str, Any]]) -> bool:
+    if not datasets or len(datasets) > 3:
+        return False
+    point_counts = [len(dataset.get("points") or []) for dataset in datasets]
+    return max(point_counts, default=0) <= 3 and sum(point_counts) <= 6
+
+
+def _datasets_to_bar_metrics(datasets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "key": dataset.get("key"),
+            "label": dataset.get("label"),
+            "values": [
+                {
+                    "year": int(point["x"]),
+                    "value": float(point["y"]),
+                    "display": point.get("display"),
+                }
+                for point in dataset.get("points") or []
+            ],
+        }
+        for dataset in datasets
+    ]
 
 
 def _build_account_bar_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
@@ -428,3 +471,26 @@ def _build_stock_price_comparison_chart(calculation: dict[str, Any]) -> dict[str
         "unit": "KRW_PRICE",
         "datasets": datasets
     }
+
+
+def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    mode = calculation.get("mode")
+    if mode == "advanced_dcf":
+        company = calculation.get("company") or {}
+        points = [
+            {"x": index, "y": float(row["fcf"]), "label": f"{row['year']}년", "display": _format_amount(float(row["fcf"]))}
+            for index, row in enumerate(calculation.get("projections") or [])
+        ]
+        return {"type": "line", "title": f"{company.get('company_name', '기업')} 10년 FCF 전망", "subtitle": "가정 기반 기준 시나리오", "unit": "KRW", "datasets": [{"key": "fcf", "label": "FCF", "points": points}]} if points else None
+    if mode == "monte_carlo_comparison":
+        bars = []
+        for item in calculation.get("simulations") or []:
+            name = (item.get("company") or {}).get("company_name", "기업")
+            bars.append({"key": name, "label": f"{name} 중앙값", "value": float(item["median"]) * 100, "display": f"{float(item['median']) * 100:.2f}%"})
+        return {"type": "bar", "title": "1년 기대수익률 분포 중앙값", "subtitle": f"{calculation.get('simulation_count', 0):,}회 시뮬레이션", "unit": "PERCENT", "bars": bars} if bars else None
+    if mode == "macro_scenario":
+        company = calculation.get("company") or {}
+        base = float(calculation.get("base_operating_income") or 0)
+        scenario = float(calculation.get("scenario_operating_income") or 0)
+        return {"type": "bar", "title": f"{company.get('company_name', '기업')} 영업이익 시나리오", "subtitle": "기준 대비 금리·환율 복합 충격", "unit": "KRW", "bars": [{"key": "base", "label": "기준", "value": base, "display": _format_amount(base)}, {"key": "scenario", "label": "충격 후", "value": scenario, "display": _format_amount(scenario)}]}
+    return None

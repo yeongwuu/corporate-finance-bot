@@ -1,4 +1,5 @@
 import re
+import json
 import urllib.request
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -546,6 +547,21 @@ def _account_amount(row: dict[str, Any] | None, account_key: str) -> float | Non
 
 
 def _fetch_listed_shares(stock_code: str, market: str | None = None) -> float | None:
+    try:
+        api_url = f"https://m.stock.naver.com/api/stock/{stock_code.zfill(6)}/integration"
+        api_request = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(api_request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        info = {item.get("code"): item.get("value") for item in payload.get("totalInfos") or []}
+        market_value = _parse_korean_market_value(info.get("marketValue"))
+        close_text = str(info.get("lastClosePrice") or "").replace(",", "")
+        close = float(close_text) if close_text else None
+        if market_value and close:
+            estimated = market_value / close
+            if estimated >= 1_000_000:
+                return estimated
+    except Exception:
+        pass
     url = f"https://finance.naver.com/item/main.naver?code={stock_code.zfill(6)}"
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
@@ -588,6 +604,19 @@ def _fetch_trailing_per(stock_code: str, market: str | None) -> float | None:
     except Exception:
         pass
     return None
+
+
+def _parse_korean_market_value(value: str | None) -> float | None:
+    if not value:
+        return None
+    total = 0.0
+    trillion = re.search(r"([0-9,]+)조", value)
+    billion = re.search(r"([0-9,]+)억", value)
+    if trillion:
+        total += float(trillion.group(1).replace(",", "")) * 1_0000_0000_0000
+    if billion:
+        total += float(billion.group(1).replace(",", "")) * 1_0000_0000
+    return total or None
 
 
 def _market_ratio_label(ratio_key: str) -> str:

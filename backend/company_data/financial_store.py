@@ -305,7 +305,14 @@ class FinancialStatementStore:
                 candidates.append(row)
         if not candidates:
             return None
-        row = max(candidates, key=lambda item: len(_compact(item["company_name"])))
+        row = max(
+            candidates,
+            key=lambda item: (
+                len(_compact(item["company_name"])),
+                bool(str(item["stock_code"] or "").strip()),
+                int(item["latest_year"] or 0),
+            ),
+        )
         return CompanyMatch(
             stock_code=row["stock_code"],
             company_name=row["company_name"],

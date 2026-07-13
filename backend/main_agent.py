@@ -20,6 +20,7 @@ from tools.time_value_tool import analyze_time_value
 from tools.valuation_tool import analyze_valuation
 from tools.working_capital_tool import analyze_working_capital
 from tools.bsm_calculator_tool import calculate_bsm_option
+from tools.advanced_analysis_tool import analyze_advanced_question
 
 
 def answer_finance_question(
@@ -163,12 +164,19 @@ def _tool_description(tool_name: str) -> str:
         "time_value_tool": "화폐의 시간가치 계산 분석",
         "stock_price_tool": "주가 데이터 및 기술적 지표 분석",
         "rag_only": "공시 및 지식 RAG 분석",
+        "advanced_analysis_tool": "고급 가치평가 및 확률·시나리오 분석",
     }
     return descriptions.get(tool_name, "종합 재무 의사결정 분석")
 
 
 def _progress_messages(tool_name: str, question: str) -> tuple[str, str, str]:
     normalized = question.lower()
+    if tool_name == "advanced_analysis_tool":
+        return (
+            "고급 분석에 필요한 재무·시장 데이터를 준비하고 있습니다.",
+            "가치평가와 확률·민감도 모델을 계산하고 있습니다.",
+            "분석 결과와 주요 가정을 정리하고 있습니다.",
+        )
     if any(keyword in normalized for keyword in ["뉴스", "동향", "업황", "이슈", "시장 흐름"]):
         return (
             "최신 뉴스와 관련 자료를 준비하고 있습니다.",
@@ -438,6 +446,13 @@ def _random_company_suggestions() -> list[str]:
 def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
+
+    if (
+        any(token in compact for token in ["몬테카를로", "기대수익률분포", "유리할확률"])
+        or ("기준금리" in compact and "환율" in compact)
+        or (any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf"]) and any(token in compact for token in ["적정주가", "기업가치", "fcf"]))
+    ):
+        return "advanced_analysis_tool"
 
     if any(word in normalized for word in ["블랙숄즈", "black-scholes", "blackscholes", "콜옵션", "풋옵션", "옵션가격", "옵션 가치", "옵션가치", "그리스", "델타", "감마", "세타", "베가", "로"]) and any(word in normalized for word in ["계산", "구해줘", "이론가격", "산출", "그리스값", "옵션"]):
         return "bsm_calculator_tool"
@@ -950,6 +965,8 @@ def _is_company_profitability_trend_question(normalized: str) -> bool:
 
 
 def run_tool(tool_name: str, question: str) -> dict:
+    if tool_name == "advanced_analysis_tool":
+        return analyze_advanced_question(question)
     if tool_name == "bsm_calculator_tool":
         return calculate_bsm_option(question)
     if tool_name == "capital_budgeting_tool":

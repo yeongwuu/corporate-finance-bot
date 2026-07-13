@@ -129,7 +129,7 @@ h2 {
   padding: 11px;
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: #F4E5D8;
+  background: #FDF0E6;
   color: #27323a;
   text-align: left;
   transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
@@ -325,7 +325,7 @@ h2 {
   display: grid;
   gap: 8px;
   margin-top: 14px;
-  padding: 12px;
+  padding: 12px 20px 12px 12px;
   border: 1px solid var(--accent-border);
   border-radius: 8px;
   background: var(--accent-soft);
@@ -1217,7 +1217,7 @@ h2 {
   font-size: 15px;
   font-weight: 700;
   border-radius: 9999px;
-  background: #F4E5D8;
+  background: #FDF0E6;
   border: 1px solid var(--border);
   color: #27323a;
   cursor: pointer;

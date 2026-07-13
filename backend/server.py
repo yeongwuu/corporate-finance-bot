@@ -262,13 +262,48 @@ def log_successful_question(question: str):
 
             questions = list(dict.fromkeys(q for q in questions if isinstance(q, str) and q.strip()))
             if cleaned not in questions:
-                if len(questions) >= RECOMMENDED_QUESTION_POOL_SIZE:
-                    questions.pop(random.randrange(len(questions)))
+                while len(questions) >= RECOMMENDED_QUESTION_POOL_SIZE:
+                    questions.pop(_replacement_question_index(questions, cleaned))
                 questions.append(cleaned)
-                with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(questions, f, ensure_ascii=False, indent=2)
+            while len(questions) > RECOMMENDED_QUESTION_POOL_SIZE:
+                removable = [index for index, item in enumerate(questions) if item != cleaned]
+                questions.pop(random.choice(removable) if removable else 0)
+            with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(questions, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Failed to log successful question: {e}")
+
+
+def _question_family(question: str) -> str:
+    compact = question.replace(" ", "").lower()
+    if "주가" in compact and any(token in compact for token in ["흐름", "변동성", "수익률", "최대낙폭", "mdd", "차트"]):
+        return "stock"
+    if any(token in compact for token in ["뉴스", "동향", "업황", "이슈"]):
+        return "news"
+    if any(token in compact for token in ["전망", "예측", "dcf", "몬테카를로", "시나리오"]):
+        return "advanced"
+    if any(token in compact for token in ["유동비율", "당좌비율", "부채비율", "roe", "roa", "per", "pbr"]):
+        return "ratio"
+    if any(token in compact for token in ["업종", "산업", "대표기업", "상위"]):
+        return "industry"
+    return "financial"
+
+
+def _replacement_question_index(questions: list[str], incoming: str) -> int:
+    family_limits = {"stock": 30, "news": 25, "advanced": 35, "ratio": 45, "industry": 40, "financial": 70}
+    grouped: dict[str, list[int]] = {}
+    for index, question in enumerate(questions):
+        grouped.setdefault(_question_family(question), []).append(index)
+    overrepresented = [
+        (len(indices) - family_limits.get(family, 40), indices)
+        for family, indices in grouped.items()
+        if len(indices) > family_limits.get(family, 40)
+    ]
+    if overrepresented:
+        return random.choice(max(overrepresented, key=lambda item: item[0])[1])
+    incoming_family = _question_family(incoming)
+    same_family = grouped.get(incoming_family) or []
+    return random.choice(same_family) if same_family else random.randrange(len(questions))
 
 FAILED_QUESTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "failed_questions.json")
 
