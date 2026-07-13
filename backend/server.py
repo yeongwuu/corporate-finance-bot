@@ -259,11 +259,12 @@ def log_successful_question(question: str):
                     questions = json.load(f)
             else:
                 questions = list(DEFAULT_SEEDS)
-            
+
+            questions = list(dict.fromkeys(q for q in questions if isinstance(q, str) and q.strip()))
             if cleaned not in questions:
+                if len(questions) >= RECOMMENDED_QUESTION_POOL_SIZE:
+                    questions.pop(random.randrange(len(questions)))
                 questions.append(cleaned)
-                if len(questions) > 200:
-                    questions = questions[-200:]
                 with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                     json.dump(questions, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -298,7 +299,7 @@ def log_failed_question(question: str, status: str, error_message: str):
             logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return a fresh set while avoiding the immediately previous recommendations."""
+    """Return a fresh set with one news question while avoiding the previous set."""
     global _last_recommended_questions
     _init_questions_file()
     with _file_write_lock:
@@ -313,9 +314,29 @@ def _generate_guaranteed_questions() -> list[str]:
         available = [question for question in questions if question not in _last_recommended_questions]
         if len(available) < RECOMMENDED_QUESTION_COUNT:
             available = questions
-        selected = random.sample(available, min(len(available), RECOMMENDED_QUESTION_COUNT))
+        news_candidates = [question for question in available if _is_news_api_question(question)]
+        if not news_candidates:
+            news_candidates = [question for question in questions if _is_news_api_question(question)]
+        news_question = random.choice(news_candidates) if news_candidates else DEFAULT_SEEDS[-1]
+        regular_candidates = [question for question in available if question != news_question and not _is_news_api_question(question)]
+        if len(regular_candidates) < RECOMMENDED_QUESTION_COUNT - 1:
+            regular_candidates.extend(
+                question
+                for question in questions
+                if question != news_question and question not in regular_candidates
+            )
+        selected = [news_question, *random.sample(
+            regular_candidates,
+            min(len(regular_candidates), RECOMMENDED_QUESTION_COUNT - 1),
+        )]
+        random.shuffle(selected)
         _last_recommended_questions = set(selected)
     return selected
+
+
+def _is_news_api_question(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    return "뉴스" in compact and any(token in compact for token in ["동향", "이슈", "흐름", "업황"])
 
 
 def find_similar_successful_questions(user_question: str) -> list[str]:

@@ -527,7 +527,7 @@ h2 {
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px 44px;
-  column-gap: 4px;
+  column-gap: 1px;
   row-gap: 10px;
   padding: 12px;
   background: var(--surface);

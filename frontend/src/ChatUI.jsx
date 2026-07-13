@@ -1196,7 +1196,10 @@ function getNumberedStepMeta(line) {
   const match = line.trim().match(/^(\d+)[.)]\s+(.+)$/);
   if (!match) return null;
   const text = match[2].replace(/[:：]\s*$/, "").trim();
-  const calculationHeadingTokens = ["공식", "대입", "계산", "산출", "결과", "해석", "조건", "변수", "자료", "단계"];
+  const calculationHeadingTokens = [
+    "공식", "대입", "계산", "산출", "결과", "해석", "조건", "변수", "자료", "단계",
+    "판단", "기준", "의견", "비교", "분석", "전망", "평가", "결정"
+  ];
   if (text.length > 32 || !calculationHeadingTokens.some((token) => text.includes(token))) return null;
   return { number: match[1], text };
 }
@@ -1413,7 +1416,7 @@ function LineChart({ chart }) {
           showSymbol: dataset.points.length <= 60,
           symbol: "circle",
           symbolSize: dataset.points.length > 40 ? 4 : 7,
-          lineStyle: { width: 3, type: dataset.forecast ? "dashed" : "solid" },
+          lineStyle: { color: colors[index % colors.length], width: 3, type: dataset.forecast ? "dashed" : "solid" },
           itemStyle: { color: "#ffffff", borderColor: colors[index % colors.length], borderWidth: 2 },
           emphasis: { focus: "series", lineStyle: { width: 4 } },
           data: dataset.points.map((point) => ({ value: [point.label || String(point.x), Number(point.y)], display: point.display, name: point.label })),

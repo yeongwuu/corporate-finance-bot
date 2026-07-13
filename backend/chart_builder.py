@@ -262,6 +262,23 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
         "display": _format_amount(float(forecast["base"])),
         "forecast": True,
     }
+    company = calculation.get("company") or {}
+    account_label = calculation.get("account_label") or "재무지표"
+    return {
+        "type": "line",
+        "title": f"{company.get('company_name', '기업')} {account_label} 전망",
+        "subtitle": f"{actual_points[0]['x']}~{target_year}년, 기준 전망 {_format_amount(float(forecast['base']))}",
+        "unit": "KRW",
+        "datasets": [
+            {"key": "actual", "label": "실적", "points": actual_points},
+            {"key": "forecast", "label": "기준 전망", "points": [last, forecast_point], "forecast": True},
+        ],
+        "range": {
+            "low": _format_amount(float(forecast["low"])),
+            "base": _format_amount(float(forecast["base"])),
+            "high": _format_amount(float(forecast["high"])),
+        },
+    }
 
 
 def _build_stock_price_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
@@ -293,25 +310,6 @@ def _build_stock_price_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
             }
         ],
     }
-    company = calculation.get("company") or {}
-    account_label = calculation.get("account_label") or "재무지표"
-    return {
-        "type": "line",
-        "title": f"{company.get('company_name', '기업')} {account_label} 전망",
-        "subtitle": f"{actual_points[0]['x']}~{target_year}년, 기준 전망 {_format_amount(float(forecast['base']))}",
-        "unit": "KRW",
-        "datasets": [
-            {"key": "actual", "label": "실적", "points": actual_points},
-            {"key": "forecast", "label": "기준 전망", "points": [last, forecast_point], "forecast": True},
-        ],
-        "range": {
-            "low": _format_amount(float(forecast["low"])),
-            "base": _format_amount(float(forecast["base"])),
-            "high": _format_amount(float(forecast["high"])),
-        },
-    }
-
-
 def _label_from_metrics(calculation: dict[str, Any], account_key: str) -> str | None:
     for metric in calculation.get("metrics") or []:
         if metric.get("account") == account_key:
