@@ -200,33 +200,59 @@ def build_rf_stock_forecast_answer(calculation: dict) -> str:
     forecast_label = calculation.get("forecast_label") or "다음 영업일"
     test_r2 = calculation.get("test_r2") or 0.0
     test_mae = calculation.get("test_mae") or 0.0
+    forecast_values = calculation.get("forecast_values") or []
+    model_name = calculation.get("model_name") or "기간별 직접 랜덤포레스트"
+    rf_test_r2 = calculation.get("rf_test_r2", test_r2)
+    rf_test_mae = calculation.get("rf_test_mae", test_mae)
+    rf_naive_test_mae = calculation.get("rf_naive_test_mae")
+    lstm_test_r2 = calculation.get("lstm_test_r2")
+    lstm_test_mae = calculation.get("lstm_test_mae")
+    weights = calculation.get("ensemble_weights") or {"rf": 1.0, "lstm": 0.0}
 
     from tools.stock_price_tool import _format_krw
 
     lines = [
-        f"🤖 **랜덤포레스트 회귀(Random Forest Regressor) 기반 주가 예측 결과**",
+        f"🤖 **RF·LSTM 주가 예측 결과**",
         f"",
-        f"**{company_name}**의 과거 주가 시계열 데이터를 기계학습 모델에 학습시켜 {forecast_label} 종가를 예측한 결과입니다.",
+        f"**{company_name}**의 과거 주가 시계열 데이터를 학습시켜 {forecast_label} 종가를 예측했습니다. 최종 선택 모델은 **{model_name}**입니다.",
         f"",
         f"*   **최신 종가 (현재가)**: {_format_krw(latest_close)}",
         f"*   **예측 종가 ({forecast_label})**: **{_format_krw(predicted_next_close)}** (변동 예상치: **{pred_return:+.2f}%**)",
         f"",
         f"📊 **모델 검증 지표 (Model Validation Metrics)**",
-        f"*   **결정계수 ($R^2$ Score)**: `{test_r2:.4f}` (1.0에 가까울수록 과거 학습 성능이 높음을 의미)",
-        f"*   **평균절대오차 (MAE)**: `{_format_krw(test_mae)}` (실제 가격 대비 평균 예측 오차 수준)",
+        f"*   **RF**: 누적수익률 $R^2$ `{rf_test_r2:.4f}`, 가격 MAE `{_format_krw(rf_test_mae)}`",
+        (
+            f"*   **LSTM**: 누적수익률 $R^2$ `{lstm_test_r2:.4f}`, 가격 MAE `{_format_krw(lstm_test_mae)}`"
+            if lstm_test_r2 is not None and lstm_test_mae is not None
+            else "*   **LSTM**: 실행 환경 또는 데이터 조건을 충족하지 못해 적용하지 않았습니다."
+        ),
+        f"*   **최종 가중치**: RF `{weights.get('rf', 1.0)*100:.1f}%`, LSTM `{weights.get('lstm', 0.0)*100:.1f}%`",
+        (f"*   **무변동 기준 가격 MAE**: `{_format_krw(rf_naive_test_mae)}`" if rf_naive_test_mae is not None else ""),
     ]
-    if test_r2 < 0:
+    if len(forecast_values) > 1:
         lines.extend(
             [
                 "",
-                "⚠️ **검증 주의**: 결정계수가 0보다 낮아 단순 평균 예측보다도 검증 성능이 낮습니다. "
-                "위 수치는 실험적 추정치이며 다음 주 방향성 판단이나 투자 의사결정에 사용하기 어렵습니다.",
+                "📅 **영업일별 예측 경로**",
+                *[f"*   **{index}영업일 뒤**: {_format_krw(value)}" for index, value in enumerate(forecast_values, 1)],
+            ]
+        )
+    if rf_test_r2 < 0 and (lstm_test_r2 is None or lstm_test_r2 < 0):
+        naive_comparison = ""
+        if rf_naive_test_mae and rf_naive_test_mae > 0:
+            improvement = (1 - rf_test_mae / rf_naive_test_mae) * 100
+            naive_comparison = f" 다만 RF 가격 MAE는 무변동 기준보다 {improvement:+.2f}% 개선됐습니다."
+        lines.extend(
+            [
+                "",
+                "⚠️ **검증 주의**: 누적수익률 결정계수가 0보다 낮아 평균 수익률만 사용하는 기준보다 방향 설명력이 낮습니다."
+                f"{naive_comparison} 위 수치는 실험적 추정치이며 {forecast_label} 방향성 판단이나 투자 의사결정에 사용하기 어렵습니다.",
             ]
         )
     lines.extend(
         [
             "",
-            "💡 *이 예측 결과는 과거 일간 가격 변동 패턴(Lag 1~5, MA5, MA20)만을 고려한 기계학습 추세 추정치입니다. 실제 주가는 거시 경제 변수, 기업 이슈, 시장 수급 등에 의해 다르게 움직일 수 있으므로 투자 판단의 참고용으로만 활용해 주시기 바랍니다.*",
+            "💡 *RF는 최근 로그수익률·변동성·모멘텀을, LSTM은 최근 40영업일의 연속 로그수익률을 학습합니다. 예측 수익률을 최신 종가에 누적 적용하며, 시간순 검증 MAE가 불리한 LSTM은 최종 예측에서 제외됩니다. 실제 주가는 거시 경제 변수, 기업 이슈, 시장 수급 등에 의해 달라질 수 있습니다.*",
         ]
     )
     return "\n".join(lines)
@@ -526,9 +552,13 @@ def build_stock_price_answer(calculation: dict) -> str:
     company_name = company.get("company_name", "해당 기업")
     period_label = period.get("label") or "조회 기간"
     price_source = calculation.get("price_source") or "Yahoo Finance"
+    data_start_date = calculation.get("data_start_date")
+    data_end_date = calculation.get("data_end_date")
     lines = [
         f"{company_name}의 {period_label} 주가 흐름은 {price_source} 종가 기준으로 조회했습니다.",
     ]
+    if data_start_date and data_end_date:
+        lines.append(f"실제 계산에 사용한 완료 거래일 범위는 {data_start_date}~{data_end_date}입니다.")
     if period.get("fallback"):
         lines.append(
             f"요청 기간({period.get('requested_start')}~{period.get('requested_end')})의 가격 데이터가 비어 있어 "

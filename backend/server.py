@@ -123,6 +123,7 @@ def health_check() -> dict:
 RECOMMENDED_QUESTION_TTL_SECONDS = 10 * 60
 RECOMMENDED_QUESTION_COUNT = 5
 RECOMMENDED_QUESTION_POOL_SIZE = 200
+TOP_FIVE_COMPANIES = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"]
 DEFAULT_SEEDS = [
     "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
     "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
@@ -276,11 +277,16 @@ def log_successful_question(question: str):
 
 def _question_family(question: str) -> str:
     compact = question.replace(" ", "").lower()
+    if any(token in compact for token in [
+        "dcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
+        "스트레스", "복합충격", "최대샤프", "최소분산", "포트폴리오", "시나리오",
+    ]):
+        return "advanced"
     if "주가" in compact and any(token in compact for token in ["흐름", "변동성", "수익률", "최대낙폭", "mdd", "차트"]):
         return "stock"
     if any(token in compact for token in ["뉴스", "동향", "업황", "이슈"]):
         return "news"
-    if any(token in compact for token in ["전망", "예측", "dcf", "몬테카를로", "시나리오"]):
+    if any(token in compact for token in ["전망", "예측"]):
         return "advanced"
     if any(token in compact for token in ["유동비율", "당좌비율", "부채비율", "roe", "roa", "per", "pbr"]):
         return "ratio"
@@ -334,7 +340,7 @@ def log_failed_question(question: str, status: str, error_message: str):
             logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return a fresh set with one news question and one KOSPI top 5 question while avoiding the previous set."""
+    """Return five diverse questions with stock, news, advanced, and top-company guarantees."""
     global _last_recommended_questions
     _init_questions_file()
     with _file_write_lock:
@@ -345,44 +351,41 @@ def _generate_guaranteed_questions() -> list[str]:
             questions = list(DEFAULT_SEEDS)
     
     questions = list(dict.fromkeys([*questions, *DEFAULT_SEEDS]))
-    kospi5 = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"]
-    
     with _question_cache_lock:
         available = [question for question in questions if question not in _last_recommended_questions]
         if len(available) < RECOMMENDED_QUESTION_COUNT:
             available = questions
-        
-        # 1. Extract news question
-        news_candidates = [question for question in available if _is_news_api_question(question)]
-        if not news_candidates:
-            news_candidates = [question for question in questions if _is_news_api_question(question)]
-        news_question = random.choice(news_candidates) if news_candidates else DEFAULT_SEEDS[-1]
-        
-        # 2. Extract KOSPI top 5 question (excluding the selected news question)
-        remaining_pool = [q for q in available if q != news_question]
-        kospi_candidates = [q for q in remaining_pool if any(comp in q for comp in kospi5)]
-        if not kospi_candidates:
-            kospi_candidates = [q for q in questions if q != news_question and any(comp in q for comp in kospi5)]
-        kospi_question = random.choice(kospi_candidates) if kospi_candidates else None
-        
-        # 3. Gather regular candidates
-        regular_candidates = [q for q in remaining_pool if q != kospi_question and not _is_news_api_question(q)]
-        if len(regular_candidates) < RECOMMENDED_QUESTION_COUNT - 2:
-            regular_candidates.extend(
-                q for q in questions
-                if q != news_question and q != kospi_question and q not in regular_candidates
-            )
-            
-        selected = [news_question]
-        if kospi_question:
-            selected.append(kospi_question)
-            
+
+        selected: list[str] = []
+        required = [
+            (_is_news_api_question, DEFAULT_SEEDS[-1]),
+            (_is_stock_recommendation_question, "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘"),
+            (_is_advanced_recommendation_question, "SK하이닉스의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘."),
+        ]
+        for predicate, fallback in required:
+            candidates = [q for q in available if q not in selected and predicate(q)]
+            if not candidates:
+                candidates = [q for q in questions if q not in selected and predicate(q)]
+            selected.append(random.choice(candidates) if candidates else fallback)
+
+        if not any(_mentions_top_five_company(question) for question in selected):
+            top_candidates = [q for q in available if q not in selected and _mentions_top_five_company(q)]
+            if not top_candidates:
+                top_candidates = [q for q in questions if q not in selected and _mentions_top_five_company(q)]
+            selected.append(random.choice(top_candidates) if top_candidates else DEFAULT_SEEDS[0])
+
+        neutral_candidates = [
+            q for q in available
+            if q not in selected
+            and not _is_news_api_question(q)
+            and not _is_stock_recommendation_question(q)
+            and not _is_advanced_recommendation_question(q)
+        ]
         needed = RECOMMENDED_QUESTION_COUNT - len(selected)
-        if needed > 0:
-            selected.extend(random.sample(
-                regular_candidates,
-                min(len(regular_candidates), needed)
-            ))
+        candidate_pool = list(neutral_candidates)
+        if len(candidate_pool) < needed:
+            candidate_pool.extend(q for q in questions if q not in selected and q not in candidate_pool)
+        selected.extend(random.sample(candidate_pool, min(needed, len(candidate_pool))))
             
         random.shuffle(selected)
         _last_recommended_questions = set(selected)
@@ -392,6 +395,27 @@ def _generate_guaranteed_questions() -> list[str]:
 def _is_news_api_question(question: str) -> bool:
     compact = question.replace(" ", "").lower()
     return "뉴스" in compact and any(token in compact for token in ["동향", "이슈", "흐름", "업황"])
+
+
+def _is_stock_recommendation_question(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    if _is_news_api_question(question) or _is_advanced_recommendation_question(question):
+        return False
+    return any(token in compact for token in ["주가", "종가", "최대낙폭", "mdd"]) and any(
+        token in compact for token in ["추이", "흐름", "변동성", "수익률", "예측", "전망", "차트", "계산"]
+    )
+
+
+def _is_advanced_recommendation_question(question: str) -> bool:
+    compact = question.replace(" ", "").lower()
+    return any(token in compact for token in [
+        "dcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
+        "스트레스", "복합충격", "최대샤프", "최소분산", "포트폴리오",
+    ])
+
+
+def _mentions_top_five_company(question: str) -> bool:
+    return any(company in question for company in TOP_FIVE_COMPANIES)
 
 
 def find_similar_successful_questions(user_question: str) -> list[str]:

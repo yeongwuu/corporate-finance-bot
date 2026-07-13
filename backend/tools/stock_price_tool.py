@@ -4,12 +4,16 @@ import math
 import re
 import ssl
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from company_data.financial_store import FinancialStatementStore
+
+
+_LSTM_FORECAST_CACHE: dict[tuple, dict[str, Any]] = {}
 
 
 def analyze_stock_price(question: str) -> dict[str, Any]:
@@ -98,6 +102,8 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
 
     prices = _build_price_points(frame)
     stats = _build_backtest_stats(frame)
+    data_start_date = frame.index[0].date().isoformat() if hasattr(frame.index[0], "date") else str(frame.index[0])
+    data_end_date = frame.index[-1].date().isoformat() if hasattr(frame.index[-1], "date") else str(frame.index[-1])
     summary = (
         f"{company.company_name}의 {period['label']} 주가 추이를 조회했습니다. "
         f"기간 수익률은 {stats['cumulative_return_display']}, "
@@ -134,6 +140,8 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
         "company": company.__dict__,
         "ticker": ticker,
         "price_source": price_source,
+        "data_start_date": data_start_date,
+        "data_end_date": data_end_date,
         "period": serializable_period,
         "prices": prices,
         "stats": stats,
@@ -261,7 +269,7 @@ def _ssl_context() -> ssl.SSLContext | None:
 
 
 def _extract_period(question: str) -> dict[str, Any]:
-    today = date.today()
+    today = _latest_completed_close_date()
     normalized = question.lower().replace(" ", "")
     years = [int(match) for match in re.findall(r"(20[0-3]\d)", question)]
     if len(years) >= 2:
@@ -290,6 +298,15 @@ def _extract_period(question: str) -> dict[str, Any]:
     if "5년" in normalized or "5개년" in normalized:
         return {"start": today - timedelta(days=365 * 5), "end": today, "label": "최근 5년"}
     return {"start": today - timedelta(days=365), "end": today, "label": "최근 1년"}
+
+
+def _latest_completed_close_date(now: datetime | None = None) -> date:
+    korea_now = now or datetime.now(ZoneInfo("Asia/Seoul"))
+    completed_date = korea_now.date()
+    # 장중 일별 시세는 확정 종가가 아니므로 정규장 종료 후 반영 여유까지 제외합니다.
+    if korea_now.weekday() < 5 and korea_now.time() < time(16, 0):
+        completed_date -= timedelta(days=1)
+    return completed_date
 
 
 def _to_yahoo_ticker(stock_code: str, market: str | None) -> str:
@@ -388,23 +405,23 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
     start_date = end_date - timedelta(days=int(duration_years * 365.25))
 
     ticker = _to_yahoo_ticker(company.stock_code, company.market)
-    naver_error = None
+    yahoo_error = None
     try:
-        frame = _download_naver_price_data(company.stock_code, start_date, end_date)
+        frame = _download_price_data(ticker, start_date, end_date)
     except Exception as exc:
-        naver_error = exc
+        yahoo_error = exc
         frame = pd.DataFrame()
 
     if frame.empty:
         try:
-            frame = _download_price_data(ticker, start_date, end_date)
-        except Exception as yahoo_error:
+            frame = _download_naver_price_data(company.stock_code, start_date, end_date)
+        except Exception as naver_error:
             return {
                 "status": "price_fetch_error",
                 "summary": f"{company.company_name}의 주가 데이터를 불러오지 못했습니다.",
                 "steps": [
-                    f"네이버 금융 조회 오류: {naver_error or '데이터 없음'}",
-                    f"Yahoo Finance 조회 오류: {yahoo_error}",
+                    f"Yahoo Finance 조회 오류: {yahoo_error or '데이터 없음'}",
+                    f"네이버 금융 조회 오류: {naver_error}",
                 ],
                 "company": company.__dict__,
                 "ticker": ticker,
@@ -422,17 +439,22 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
     import numpy as np
     import pandas as pd
 
+    forecast_days = _forecast_horizon_days(question)
+    forecast_label = _forecast_horizon_label(forecast_days)
+
     df = frame[["Close"]].copy()
-    df["target"] = df["Close"].shift(-1)
+    df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
+    for i in range(5):
+        df[f"return_lag_{i}"] = df["log_return"].shift(i)
 
-    for i in range(1, 6):
-        df[f"lag_{i}"] = df["Close"].shift(i)
+    df["return_ma_5"] = df["log_return"].rolling(window=5).mean()
+    df["return_ma_20"] = df["log_return"].rolling(window=20).mean()
+    df["return_vol_20"] = df["log_return"].rolling(window=20).std()
+    df["momentum_5"] = np.log(df["Close"] / df["Close"].shift(5))
+    df["momentum_20"] = np.log(df["Close"] / df["Close"].shift(20))
+    feature_df = df.dropna().copy()
 
-    df["ma_5"] = df["Close"].rolling(window=5).mean()
-    df["ma_20"] = df["Close"].rolling(window=20).mean()
-    df = df.dropna()
-
-    if len(df) < 20:
+    if len(feature_df) < 20 + forecast_days:
         return {
             "status": "no_data",
             "summary": "피처 구성에 필요한 학습 데이터 셋이 충분하지 않습니다.",
@@ -441,38 +463,67 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
             "ticker": ticker,
         }
 
-    feature_cols = ["lag_1", "lag_2", "lag_3", "lag_4", "lag_5", "ma_5", "ma_20"]
-    X = df[feature_cols].values
-    y = df["target"].values
+    feature_cols = [
+        "return_lag_0", "return_lag_1", "return_lag_2", "return_lag_3", "return_lag_4",
+        "return_ma_5", "return_ma_20", "return_vol_20", "momentum_5", "momentum_20",
+    ]
 
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.metrics import r2_score, mean_absolute_error
 
-    split_idx = int(len(df) * 0.9)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-
-    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-    model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-    test_r2 = float(r2_score(y_test, y_pred))
-    test_mae = float(mean_absolute_error(y_test, y_pred))
-
-    model.fit(X, y)
-
     latest_close = float(frame.iloc[-1]["Close"])
-    forecast_days = _forecast_horizon_days(question)
-    forecast_label = "다음주(5영업일)" if forecast_days == 5 else "다음 영업일"
-    rolling_closes = [float(value) for value in frame["Close"].values]
+    latest_features = feature_df[feature_cols].iloc[-1:].values
     forecast_values = []
-    for _ in range(forecast_days):
-        lags = [rolling_closes[-i] for i in range(1, 6)]
-        ma5 = float(np.mean(rolling_closes[-5:]))
-        ma20 = float(np.mean(rolling_closes[-20:]))
-        predicted_close = float(model.predict(np.array([[*lags, ma5, ma20]]))[0])
-        forecast_values.append(predicted_close)
-        rolling_closes.append(predicted_close)
+    test_r2 = 0.0
+    test_mae = 0.0
+    naive_test_mae = 0.0
+    for horizon in range(1, forecast_days + 1):
+        horizon_df = feature_df.copy()
+        horizon_df["target_return"] = np.log(frame["Close"].shift(-horizon) / frame["Close"])
+        horizon_df["target_close"] = frame["Close"].shift(-horizon)
+        horizon_df = horizon_df.dropna()
+        X = horizon_df[feature_cols].values
+        y = horizon_df["target_return"].values
+        split_idx = max(1, min(len(horizon_df) - 1, int(len(horizon_df) * 0.9)))
+        train_end = max(1, split_idx - horizon)
+        X_train, X_test = X[:train_end], X[split_idx:]
+        y_train, y_test = y[:train_end], y[split_idx:]
+
+        model = RandomForestRegressor(n_estimators=100, random_state=42 + horizon, n_jobs=-1)
+        model.fit(X_train, y_train)
+        if horizon == forecast_days:
+            predicted_returns = model.predict(X_test)
+            base_prices = horizon_df["Close"].values[split_idx:]
+            actual_prices = horizon_df["target_close"].values[split_idx:]
+            predicted_prices = base_prices * np.exp(predicted_returns)
+            test_r2 = float(r2_score(y_test, predicted_returns)) if len(y_test) >= 2 else 0.0
+            test_mae = float(mean_absolute_error(actual_prices, predicted_prices))
+            naive_test_mae = float(mean_absolute_error(actual_prices, base_prices))
+        model.fit(X, y)
+        forecast_return = float(model.predict(latest_features)[0])
+        forecast_values.append(float(latest_close * np.exp(forecast_return)))
+
+    rf_forecast_values = list(forecast_values)
+    rf_test_r2, rf_test_mae, rf_naive_test_mae = test_r2, test_mae, naive_test_mae
+    lstm_result = _predict_stock_price_lstm(frame["Close"], forecast_days)
+    lstm_forecast_values = lstm_result.get("forecast_values") or []
+    lstm_test_r2 = lstm_result.get("test_r2")
+    lstm_test_mae = lstm_result.get("test_mae")
+    rf_weight, lstm_weight = 1.0, 0.0
+    model_name = "기간별 직접 랜덤포레스트"
+    if lstm_result.get("status") == "ok" and len(lstm_forecast_values) == forecast_days:
+        if lstm_test_mae <= rf_test_mae * 1.05:
+            inverse_rf = 1.0 / max(rf_test_mae, 1.0)
+            inverse_lstm = 1.0 / max(lstm_test_mae, 1.0)
+            lstm_weight = inverse_lstm / (inverse_rf + inverse_lstm)
+            rf_weight = 1.0 - lstm_weight
+            forecast_values = [
+                rf_value * rf_weight + lstm_value * lstm_weight
+                for rf_value, lstm_value in zip(rf_forecast_values, lstm_forecast_values)
+            ]
+            model_name = "랜덤포레스트·LSTM 검증 가중 앙상블"
+        else:
+            model_name = "랜덤포레스트 (LSTM 검증 후 성능 우선 선택)"
 
     predicted_next_close = forecast_values[-1]
     pred_return = (predicted_next_close / latest_close - 1.0) * 100.0
@@ -496,17 +547,27 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
         })
 
     summary = (
-        f"랜덤포레스트 회귀모델로 {company.company_name}의 {forecast_label} 종가를 예측한 결과, "
+        f"{model_name}으로 {company.company_name}의 {forecast_label} 종가를 예측한 결과, "
         f"현재가 {_format_krw(latest_close)} 대비 **{pred_return:+.2f}%** 변동한 "
-        f"**{_format_krw(predicted_next_close)}**으로 전망됩니다. (검증 셋 결정계수 $R^2$: {test_r2:.2f}, MAE: {_format_krw(test_mae)})"
+        f"**{_format_krw(predicted_next_close)}**으로 전망됩니다."
     )
 
     steps = [
         f"예측 기업: {company.company_name}({company.stock_code})",
         f"학습 기간: {start_date.isoformat()} ~ {end_date.isoformat()} (최근 {duration_years}년, {len(frame)}영업일 데이터)",
-        f"학습 알고리즘: RandomForestRegressor (sklearn, n_estimators=100)",
-        f"사용 특징(Features): Lag 1~5일 종가, 5일 이동평균(MA5), 20일 이동평균(MA20)",
-        f"검증 스코어: R2 결정계수 = {test_r2:.4f} / MAE = {_format_krw(test_mae)}",
+        f"최종 예측 모델: {model_name}",
+        f"RF: 기간별 직접 예측 RandomForestRegressor (sklearn, n_estimators=100)",
+        "LSTM: 최근 40영업일 연속 종가로 요청 기간 전체를 동시 예측",
+        "RF 특징: 로그수익률 Lag 0~4, 5·20일 평균수익률, 20일 변동성, 5·20일 모멘텀",
+        f"RF {forecast_label} 검증: R2 = {rf_test_r2:.4f} / MAE = {_format_krw(rf_test_mae)}",
+        f"RF 무변동 기준 MAE: {_format_krw(rf_naive_test_mae)}",
+        (
+            f"LSTM {forecast_label} 검증: R2 = {lstm_test_r2:.4f} / MAE = {_format_krw(lstm_test_mae)}"
+            if lstm_result.get("status") == "ok"
+            else f"LSTM 적용 보류: {lstm_result.get('message', '학습 환경을 확인하지 못했습니다.')}"
+        ),
+        f"앙상블 가중치: RF {rf_weight*100:.1f}% / LSTM {lstm_weight*100:.1f}%",
+        *[f"{index}영업일 뒤 예측치: {_format_krw(value)}" for index, value in enumerate(forecast_values, 1)],
         f"{forecast_label} 최종 예측치: {_format_krw(predicted_next_close)} (현재가 {_format_krw(latest_close)} 대비 {pred_return:+.2f}% 변동 예상)"
     ]
 
@@ -522,15 +583,154 @@ def predict_stock_price_rf(question: str, company: Any) -> dict[str, Any]:
         "pred_return": pred_return,
         "forecast_days": forecast_days,
         "forecast_label": forecast_label,
+        "forecast_values": forecast_values,
         "test_r2": test_r2,
         "test_mae": test_mae,
+        "rf_test_r2": rf_test_r2,
+        "rf_test_mae": rf_test_mae,
+        "rf_naive_test_mae": rf_naive_test_mae,
+        "lstm_test_r2": lstm_test_r2,
+        "lstm_test_mae": lstm_test_mae,
+        "rf_forecast_values": rf_forecast_values,
+        "lstm_forecast_values": lstm_forecast_values,
+        "model_name": model_name,
+        "ensemble_weights": {"rf": rf_weight, "lstm": lstm_weight},
         "prices_list": prices_list
     }
 
 
 def _forecast_horizon_days(question: str) -> int:
     compact = question.replace(" ", "").lower()
-    return 5 if any(term in compact for term in ["다음주", "향후1주", "일주일", "1주일"]) else 1
+    if any(term in compact for term in ["다음주", "향후1주", "일주일", "1주일"]):
+        return 5
+    patterns = [
+        r"(\d+)(?:영업일|거래일|일)(?:뒤|후)",
+        r"(?:향후|앞으로)(\d+)(?:영업일|거래일|일)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, compact)
+        if match:
+            return max(1, min(20, int(match.group(1))))
+    return 1
+
+
+def _forecast_horizon_label(forecast_days: int) -> str:
+    if forecast_days == 1:
+        return "다음 영업일"
+    if forecast_days == 5:
+        return "다음주(5영업일 뒤)"
+    return f"{forecast_days}영업일 뒤"
+
+
+def _predict_stock_price_lstm(close_series: Any, forecast_days: int) -> dict[str, Any]:
+    try:
+        import numpy as np
+        import torch
+        from sklearn.metrics import mean_absolute_error, r2_score
+        from torch import nn
+        from torch.utils.data import DataLoader, TensorDataset
+    except ImportError:
+        return {"status": "missing_dependency", "message": "PyTorch가 설치되어 있지 않습니다."}
+
+    values = pd.to_numeric(close_series, errors="coerce").dropna().astype(float).to_numpy()
+    sequence_length = 40
+    if len(values) < sequence_length + forecast_days + 40:
+        return {"status": "no_data", "message": "LSTM 학습에 필요한 연속 주가 데이터가 부족합니다."}
+
+    cache_key = (
+        len(values),
+        round(float(values.mean()), 4),
+        round(float(values.std()), 4),
+        round(float(values[-1]), 4),
+        forecast_days,
+    )
+    cached = _LSTM_FORECAST_CACHE.get(cache_key)
+    if cached:
+        return cached
+
+    torch.manual_seed(42)
+    np.random.seed(42)
+    torch.set_num_threads(1)
+    log_returns = np.diff(np.log(values))
+    scale_cutoff = max(sequence_length + forecast_days, int(len(log_returns) * 0.9))
+    scale_mean = float(log_returns[:scale_cutoff].mean())
+    scale_std = float(log_returns[:scale_cutoff].std()) or 1.0
+    normalized = (log_returns - scale_mean) / scale_std
+
+    sequences, targets, base_prices = [], [], []
+    for target_start in range(sequence_length, len(normalized) - forecast_days + 1):
+        sequences.append(normalized[target_start - sequence_length:target_start])
+        targets.append(normalized[target_start:target_start + forecast_days])
+        base_prices.append(values[target_start])
+    X = np.asarray(sequences, dtype=np.float32)[..., np.newaxis]
+    y = np.asarray(targets, dtype=np.float32)
+    split_idx = max(1, min(len(X) - 1, int(len(X) * 0.9)))
+    train_end = max(1, split_idx - forecast_days)
+    X_train = torch.from_numpy(X[:train_end])
+    y_train = torch.from_numpy(y[:train_end])
+    X_val = torch.from_numpy(X[split_idx:])
+    y_val = torch.from_numpy(y[split_idx:])
+
+    class PriceLSTM(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lstm = nn.LSTM(input_size=1, hidden_size=32, num_layers=1, batch_first=True)
+            self.output = nn.Linear(32, forecast_days)
+
+        def forward(self, inputs):
+            output, _ = self.lstm(inputs)
+            return self.output(output[:, -1, :])
+
+    model = PriceLSTM()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.006, weight_decay=1e-5)
+    loss_fn = nn.MSELoss()
+    loader = DataLoader(TensorDataset(X_train, y_train), batch_size=64, shuffle=False)
+    best_loss, best_state, patience = float("inf"), None, 0
+    for _ in range(45):
+        model.train()
+        for batch_x, batch_y in loader:
+            optimizer.zero_grad()
+            loss = loss_fn(model(batch_x), batch_y)
+            loss.backward()
+            optimizer.step()
+        model.eval()
+        with torch.no_grad():
+            validation_loss = float(loss_fn(model(X_val), y_val).item())
+        if validation_loss < best_loss - 1e-5:
+            best_loss = validation_loss
+            best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+            patience = 0
+        else:
+            patience += 1
+            if patience >= 7:
+                break
+    if best_state:
+        model.load_state_dict(best_state)
+
+    model.eval()
+    with torch.no_grad():
+        validation_pred_returns = model(X_val).numpy() * scale_std + scale_mean
+        validation_actual_returns = y_val.numpy() * scale_std + scale_mean
+        latest_sequence = torch.from_numpy(normalized[-sequence_length:].astype(np.float32).reshape(1, sequence_length, 1))
+        forecast_returns = model(latest_sequence).numpy()[0] * scale_std + scale_mean
+    validation_bases = np.asarray(base_prices[split_idx:], dtype=float)
+    actual_cumulative_returns = validation_actual_returns.sum(axis=1)
+    predicted_cumulative_returns = validation_pred_returns.sum(axis=1)
+    final_actual = validation_bases * np.exp(actual_cumulative_returns)
+    final_pred = validation_bases * np.exp(predicted_cumulative_returns)
+    forecast = values[-1] * np.exp(np.cumsum(forecast_returns))
+    result = {
+        "status": "ok",
+        "forecast_values": [float(value) for value in forecast],
+        "test_r2": float(r2_score(actual_cumulative_returns, predicted_cumulative_returns)) if len(final_actual) >= 2 else 0.0,
+        "test_mae": float(mean_absolute_error(final_actual, final_pred)),
+        "naive_test_mae": float(mean_absolute_error(final_actual, validation_bases)),
+        "sequence_length": sequence_length,
+    }
+    if len(_LSTM_FORECAST_CACHE) >= 32:
+        _LSTM_FORECAST_CACHE.pop(next(iter(_LSTM_FORECAST_CACHE)))
+    _LSTM_FORECAST_CACHE[cache_key] = result
+    return result
 
 
 def _next_business_dates(start: date, count: int) -> list[date]:

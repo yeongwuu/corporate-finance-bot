@@ -70,6 +70,7 @@ const FALLBACK_RECOMMENDED_QUESTIONS = [
   "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
   "삼성전자의 최근 5개년 PER 추이를 계산해줘",
   "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
+  "SK하이닉스의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘.",
   "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
   "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘"
 ];
@@ -297,6 +298,7 @@ export default function ChatUI() {
           timestamp: formatMessageTimestamp(new Date()),
           meta: {
             animate: true,
+            question: displayQuestion,
             tool: data.tool,
             status: data.calculation?.status,
             references: buildDisplayReferences(data.references),
@@ -334,6 +336,7 @@ export default function ChatUI() {
           timestamp: formatMessageTimestamp(new Date()),
           meta: {
             animate: true,
+            question: displayQuestion,
             tool: error.name === "AbortError" ? "cancelled" : "network",
             status: error.name === "AbortError" ? "cancelled" : "error",
             suggestions: error.name === "AbortError" ? [] : buildAlternativeQuestions(displayQuestion),
@@ -650,30 +653,25 @@ export default function ChatUI() {
 
 function buildFallbackRecommendedQuestions() {
   const newsQuestion = "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘";
+  const stockQuestion = "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘";
+  const advancedQuestion = "SK하이닉스의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘.";
   const kospi5 = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"];
-  
-  const pool = FALLBACK_RECOMMENDED_QUESTIONS.filter((q) => q !== newsQuestion);
-  const kospiQuestions = pool.filter((q) => kospi5.some((comp) => q.includes(comp)));
-  const otherQuestions = pool.filter((q) => !kospi5.some((comp) => q.includes(comp)));
-  
-  const selected = [];
-  selected.push(newsQuestion);
-  
-  let chosenKospi = null;
-  if (kospiQuestions.length > 0) {
-    const shuffledKospi = [...kospiQuestions].sort(() => Math.random() - 0.5);
-    chosenKospi = shuffledKospi[0];
-    selected.push(chosenKospi);
+
+  const selected = [newsQuestion, stockQuestion, advancedQuestion];
+  if (!selected.some((question) => kospi5.some((company) => question.includes(company)))) {
+    selected.push("삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘");
   }
-  
-  const remainingPool = [
-    ...kospiQuestions.filter((q) => q !== chosenKospi),
-    ...otherQuestions
-  ].sort(() => Math.random() - 0.5);
-  
-  const needed = 5 - selected.length;
-  selected.push(...remainingPool.slice(0, needed));
-  
+  const remainingPool = FALLBACK_RECOMMENDED_QUESTIONS
+    .filter((question) => {
+      if (selected.includes(question)) return false;
+      const compact = question.replaceAll(" ", "").toLowerCase();
+      const isNews = compact.includes("뉴스");
+      const isStock = ["주가", "종가", "최대낙폭", "mdd"].some((token) => compact.includes(token));
+      const isAdvanced = ["dcf", "wacc", "영구성장률", "몬테카를로", "스트레스", "최대샤프", "최소분산", "포트폴리오"].some((token) => compact.includes(token));
+      return !isNews && !isStock && !isAdvanced;
+    })
+    .sort(() => Math.random() - 0.5);
+  selected.push(...remainingPool.slice(0, 5 - selected.length));
   return selected.sort(() => Math.random() - 0.5);
 }
 
@@ -720,9 +718,27 @@ function MessageText({ message, onAskSuggestion }) {
   }
 
   const [shared, setShared] = useState(false);
-  function shareLink() {
+  async function shareQuestionAndAnswer() {
+    const question = message.meta?.question || message.meta?.failureConsent?.question;
+    const shareText = [
+      question ? `질문\n${question}` : null,
+      `답변\n${message.content}`,
+    ].filter(Boolean).join("\n\n");
+
     try {
-      navigator.clipboard.writeText(window.location.href);
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: question ? `금융 챗봇 답변: ${question.slice(0, 40)}` : "금융 챗봇 답변",
+            text: shareText,
+          });
+        } catch (error) {
+          if (error?.name === "AbortError") return;
+          await navigator.clipboard.writeText(shareText);
+        }
+      } else {
+        await navigator.clipboard.writeText(shareText);
+      }
       setShared(true);
       window.setTimeout(() => setShared(false), 1400);
     } catch {
@@ -763,9 +779,10 @@ function MessageText({ message, onAskSuggestion }) {
           </button>
           <button
             type="button"
-            onClick={shareLink}
-            aria-label="링크 공유"
-            title="링크 공유"
+            className={shared ? "active" : undefined}
+            onClick={shareQuestionAndAnswer}
+            aria-label="질문과 답변 공유"
+            title={shared ? "공유했습니다" : "질문과 답변 공유"}
             style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
