@@ -325,6 +325,8 @@ def _resolve_company_clarification(question: str, history: list[dict]) -> str | 
         return None
     if company is None:
         return None
+    if not _is_company_only_clarification(question, company.company_name, company.stock_code):
+        return None
 
     pending_question = next(
         (
@@ -337,6 +339,28 @@ def _resolve_company_clarification(question: str, history: list[dict]) -> str | 
     if not pending_question:
         return None
     return f"{pending_question}\n회사명: {company.company_name}({company.stock_code})"
+
+
+def _is_company_only_clarification(question: str, company_name: str, stock_code: str) -> bool:
+    compact = re.sub(r"[\s?.,!()\[\]{}]+", "", question.lower())
+    compact = compact.replace(company_name.lower().replace(" ", ""), "")
+    compact = compact.replace(str(stock_code).lower(), "")
+    return compact in {
+        "",
+        "요",
+        "이요",
+        "입니다",
+        "로",
+        "으로",
+        "로해줘",
+        "으로해줘",
+        "로해주세요",
+        "으로해주세요",
+        "로분석해줘",
+        "으로분석해줘",
+        "로분석해주세요",
+        "으로분석해주세요",
+    }
 
 
 def _should_use_context(question: str) -> bool:
@@ -951,7 +975,25 @@ def _is_industry_rank_question(normalized: str) -> bool:
         return True
     rank_terms = ["상위", "top", "순위", "랭킹", "랭크"]
     group_terms = ["산업", "업종", "섹터", "기업", "회사", "산업군"]
-    return any(term in normalized for term in rank_terms) and any(term in normalized for term in group_terms)
+    highest_revenue_terms = [
+        "가장매출액이큰",
+        "매출액이가장큰",
+        "가장매출이큰",
+        "매출이가장큰",
+        "매출액이가장높은",
+        "매출이가장높은",
+        "매출액최대",
+        "매출최대",
+        "최대매출액",
+        "최대매출",
+    ]
+    has_ranking_expression = any(term in normalized for term in rank_terms) or any(
+        term in compact for term in highest_revenue_terms
+    )
+    has_industry_context = any(term in normalized for term in ["산업", "업종", "섹터", "산업군"])
+    if any(term in compact for term in highest_revenue_terms):
+        return has_industry_context
+    return has_ranking_expression and any(term in normalized for term in group_terms)
 
 
 def _is_representative_company_analysis_question(normalized: str) -> bool:

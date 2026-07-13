@@ -109,7 +109,7 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     if not company:
         industry = _extract_peer_industry(question, None)
         if industry and industry != "산업" and any(word in question for word in ["성장률", "추이", "비교", "분석"]) and any(word in question for word in ["매출", "영업이익", "순이익"]):
-            peers = _query_peer_companies(store, industry, None, limit=5)
+            peers = _query_peer_companies(store, industry, None, limit=10)
             if peers:
                 return _analyze_industry_peers_growth_direct(question, store, industry, peers)
         
@@ -1001,6 +1001,9 @@ def _extract_peer_industry(question: str, base_company: Any) -> str:
     compact = question.replace(" ", "")
     if "반도체" in compact:
         return "반도체"
+    related_company_match = re.search(r"^\s*(.+?)\s+관련\s+(?:기업들|기업|회사들|회사)", question)
+    if related_company_match:
+        return re.sub(r"^기타\s*", "", related_company_match.group(1)).strip()
     match = re.search(r"([가-힣A-Za-z0-9]+)\s*(?:기업들|업종|산업|섹터)", question)
     if match:
         ret = match.group(1)
@@ -1031,18 +1034,23 @@ def _query_peer_companies(
         where_parts.append("(company_name LIKE ? OR industry_name LIKE ?)")
         params.extend([f"%{keyword}%", f"%{keyword}%"])
     where_sql = " OR ".join(where_parts) if where_parts else "1=1"
+    base_order = "CASE WHEN stock_code = ? THEN 0 ELSE 1 END," if base_company else ""
     query = f"""
         SELECT stock_code, company_name, market, industry_name, MAX(fiscal_year) AS latest_year
         FROM financial_items
-        WHERE ({where_sql})
+        WHERE stock_code != ''
+          AND ({where_sql})
         GROUP BY stock_code, company_name, market, industry_name
+        HAVING COUNT(DISTINCT fiscal_year) >= 3
         ORDER BY
-            CASE WHEN stock_code = ? THEN 0 ELSE 1 END,
+            {base_order}
             latest_year DESC,
             company_name
         LIMIT ?
     """
-    params.extend([base_company.stock_code, limit])
+    if base_company:
+        params.append(base_company.stock_code)
+    params.append(limit)
     conn = sqlite3.connect(store.db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -1060,7 +1068,7 @@ def _query_peer_companies(
             continue
         seen.add(row["stock_code"])
         companies.append(
-            type(base_company)(
+            CompanyMatch(
                 stock_code=row["stock_code"],
                 company_name=row["company_name"],
                 market=row["market"],
@@ -1099,7 +1107,7 @@ def _peer_industry_keywords(industry: str) -> list[str]:
     if norm in ["IT", "정보기술", "인터넷", "플랫폼"]:
         return ["소프트웨어", "인터넷", "포털", "플랫폼", "IT", "시스템 통합", "SI"]
 
-    return [norm]
+    return list(dict.fromkeys([industry.strip(), norm]))
 
 
 def _try_build_dart_revenue_series(company: Any, start_year: int, end_year: int) -> list[dict[str, Any]]:
@@ -1509,13 +1517,11 @@ def _fill_missing_series_with_yfinance(company: Any, account_keys: list[str], se
     missing_keys = []
     for key in account_keys:
         if key in yf_mapping:
-            is_missing = True
-            for row in series:
-                val = row.get(key)
-                if val and isinstance(val, dict) and val.get("amount") is not None:
-                    is_missing = False
-                    break
-            if is_missing:
+            has_missing_value = any(
+                not isinstance(row.get(key), dict) or row[key].get("amount") is None
+                for row in series
+            )
+            if has_missing_value:
                 missing_keys.append(key)
 
     if not missing_keys:
@@ -1606,6 +1612,20 @@ def _analyze_industry_peers_growth_direct(
             continue
         period = _extract_period(question, available_years)
         series = store.get_account_series(company.stock_code, ["revenue", "operating_income"], period.start_year, period.end_year)
+        series = _fill_missing_series_with_yfinance(company, ["revenue", "operating_income"], series, period)
+        revenue_count = sum(
+            1
+            for row in series
+            if isinstance(row.get("revenue"), dict) and row["revenue"].get("amount") is not None
+        )
+        if revenue_count < 3:
+            dart_rows = _try_build_dart_revenue_series(company, period.start_year, period.end_year)
+            dart_by_year = {int(row["year"]): row.get("revenue") for row in dart_rows}
+            for row in series:
+                if not isinstance(row.get("revenue"), dict) or row["revenue"].get("amount") is None:
+                    dart_revenue = dart_by_year.get(int(row["year"]))
+                    if dart_revenue:
+                        row["revenue"] = dart_revenue
         metrics = _build_metric_summary(series, ["revenue", "operating_income"])
         revenue_metric = _find_metric(metrics, "revenue")
         if not revenue_metric or revenue_metric.get("growth") is None:
@@ -1623,6 +1643,8 @@ def _analyze_industry_peers_growth_direct(
                 "is_base": False,
             }
         )
+        if len(summaries) >= 5:
+            break
 
     summaries.sort(
         key=lambda item: (
@@ -1648,20 +1670,22 @@ def _analyze_industry_peers_growth_direct(
     for item in summaries:
         comp_name = item["company"]["company_name"]
         period_lbl = f"{item['period']['start_year']}~{item['period']['end_year']}년"
+        cagr_text = f"{item['cagr'] * 100:.2f}%" if item.get("cagr") is not None else "계산 불가"
         steps.append(
             f"{item['rank']}위. {comp_name} ({period_lbl}): "
-            f"누적 매출성장률 {item['growth'] * 100:.2f}%, CAGR {item['cagr'] * 100:.2f}%"
+            f"누적 매출성장률 {item['growth'] * 100:.2f}%, CAGR {cagr_text}"
         )
         for row in item["series"]:
             y = row["year"]
-            rev = row.get("revenue", {}).get("amount")
-            op = row.get("operating_income", {}).get("amount")
+            rev = (row.get("revenue") or {}).get("amount")
+            op = (row.get("operating_income") or {}).get("amount")
             rev_str = _format_amount(rev) if rev is not None else "데이터 없음"
             op_str = _format_amount(op) if op is not None else "데이터 없음"
             steps.append(f"  - {y}년: 매출액 {rev_str}, 영업이익 {op_str}")
 
     return {
         "status": "ok",
+        "mode": "industry_growth_comparison",
         "summary": f"{industry} 업종에 속한 주요 기업들의 매출성장률을 분석해 비교했습니다.",
         "steps": steps,
         "comparison": summaries,

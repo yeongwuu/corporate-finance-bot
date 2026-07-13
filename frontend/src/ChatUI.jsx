@@ -263,7 +263,9 @@ export default function ChatUI() {
         } else if (eventName === "result") {
           data = parsed;
         } else if (eventName === "error") {
-          throw new Error(parsed.message || "서버에서 답변을 생성하지 못했습니다.");
+          const streamError = new Error(parsed.message || "서버에서 답변을 생성하지 못했습니다.");
+          streamError.suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+          throw streamError;
         }
       };
 
@@ -288,8 +290,11 @@ export default function ChatUI() {
       const answer = data.answer || "답변을 생성하지 못했습니다.";
       const needsCompany = data.calculation?.status === "needs_company";
       const serverSuggestions = Array.isArray(data.suggestions)
-        ? data.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 3)
+        ? data.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2)
         : [];
+      const recommendationFallback = recommendedQuestions
+        .filter((suggestion) => suggestion && suggestion !== displayQuestion)
+        .slice(0, 2);
       setMessages([
         ...nextMessages,
         {
@@ -307,7 +312,7 @@ export default function ChatUI() {
             suggestions: needsCompany
               ? buildExampleCompanies(data.calculation?.suggested_companies)
               : shouldShowAlternativeQuestions(answer, data)
-                ? (serverSuggestions.length ? serverSuggestions : buildAlternativeQuestions(displayQuestion))
+                ? (serverSuggestions.length ? serverSuggestions : recommendationFallback)
                 : [],
             suggestionTitle: needsCompany ? "예시 기업들" : undefined,
             failureConsent: shouldAskFeedbackConsent(data, answer)
@@ -328,6 +333,9 @@ export default function ChatUI() {
           : error.message === "Failed to fetch"
             ? "백엔드 서버에 연결하지 못했습니다."
             : error.message;
+      const errorSuggestions = Array.isArray(error.suggestions)
+        ? error.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2)
+        : recommendedQuestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2);
       setMessages([
         ...nextMessages,
         {
@@ -339,7 +347,7 @@ export default function ChatUI() {
             question: displayQuestion,
             tool: error.name === "AbortError" ? "cancelled" : "network",
             status: error.name === "AbortError" ? "cancelled" : "error",
-            suggestions: error.name === "AbortError" ? [] : buildAlternativeQuestions(displayQuestion),
+            suggestions: error.name === "AbortError" ? [] : errorSuggestions,
             failureConsent: error.name === "AbortError"
               ? null
               : { question: displayQuestion, answer, tool: "network", status: "error" },
@@ -1588,7 +1596,7 @@ function BarChart({ chart }) {
       data: chart.bars.map((bar, index) => ({
         value: Number(bar.value),
         display: bar.display,
-        itemStyle: { color: colors[index], borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
+        itemStyle: { color: bar.color || colors[index], borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
         label: { show: true, position: Number(bar.value) < 0 ? "left" : "right", color: "#27323a", fontSize: 10, fontWeight: 700, formatter: bar.display },
       })),
     }],

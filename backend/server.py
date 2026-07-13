@@ -275,6 +275,42 @@ def log_successful_question(question: str):
             logger.error(f"Failed to log successful question: {e}")
 
 
+def _is_verified_successful_result(question: str, result: dict) -> bool:
+    calculation = result.get("calculation") or {}
+    if calculation.get("status") != "ok":
+        return False
+
+    answer = str(result.get("answer") or "")
+    failure_phrases = [
+        "답변 데이터를 수신하지 못했습니다",
+        "찾지 못했습니다",
+        "데이터가 부족",
+        "어떤 기업이 궁금하세요",
+        "오류가 발생",
+    ]
+    if not answer or any(phrase in answer for phrase in failure_phrases):
+        return False
+
+    compact = question.replace(" ", "").lower()
+    forecast_intent = any(token in compact for token in ["예측", "전망", "추정", "내년", "다음해"])
+    financial_metric = any(
+        token in compact
+        for token in ["매출", "영업이익", "순이익", "현금흐름", "자산", "부채", "자본", "실적"]
+    )
+    if forecast_intent and financial_metric:
+        return (
+            result.get("tool") == "forecast_tool"
+            and isinstance(calculation.get("forecast"), dict)
+            and len(calculation.get("series") or []) >= 3
+            and bool(calculation.get("target_year"))
+        )
+
+    if forecast_intent and "주가" in compact:
+        return result.get("tool") == "stock_price_tool" and bool(calculation.get("forecast_values"))
+
+    return True
+
+
 def _question_family(question: str) -> str:
     compact = question.replace(" ", "").lower()
     if any(token in compact for token in [
@@ -501,13 +537,17 @@ def chat(request: ChatRequest) -> StreamingResponse:
                 on_step=on_step
             )
             result_status = (res.get("calculation") or {}).get("status") or res.get("status")
-            if result_status == "ok" and not request.attachment:
+            if result_status == "ok" and not request.attachment and _is_verified_successful_result(request.question, res):
                 log_successful_question(request.question)
             res["suggestions"] = find_similar_successful_questions(request.question)
             q.put(f"event: result\ndata: {json.dumps(res, ensure_ascii=False)}\n\n")
         except Exception as e:
             logger.exception("Agent execution failed")
-            q.put(f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n")
+            suggestions = find_similar_successful_questions(request.question)[:2]
+            q.put(
+                f"event: error\ndata: "
+                f"{json.dumps({'message': str(e), 'suggestions': suggestions}, ensure_ascii=False)}\n\n"
+            )
         finally:
             q.put(None)
 

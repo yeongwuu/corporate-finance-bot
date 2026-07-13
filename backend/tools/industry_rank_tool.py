@@ -389,12 +389,7 @@ def _query_ranked_companies(
         params.extend(SEMICONDUCTOR_COMPANY_NAMES)
 
     query = f"""
-        WITH latest AS (
-            SELECT stock_code, MAX(fiscal_year) AS fiscal_year
-            FROM financial_items
-            GROUP BY stock_code
-        ),
-        revenue AS (
+        WITH revenue AS (
             SELECT
                 f.fiscal_year,
                 f.stock_code,
@@ -403,9 +398,6 @@ def _query_ranked_companies(
                 f.industry_name,
                 MAX(ABS(f.amount)) AS revenue
             FROM financial_items f
-            JOIN latest l
-              ON f.stock_code = l.stock_code
-             AND f.fiscal_year = l.fiscal_year
             WHERE f.statement_type = 'PL'
               AND f.amount IS NOT NULL
               AND (
@@ -416,13 +408,27 @@ def _query_ranked_companies(
               )
               AND ({' OR '.join(where_parts)})
             GROUP BY f.fiscal_year, f.stock_code, f.company_name, f.market, f.industry_name
+        ),
+        year_counts AS (
+            SELECT fiscal_year, COUNT(DISTINCT stock_code) AS company_count
+            FROM revenue
+            GROUP BY fiscal_year
+        ),
+        latest_industry_year AS (
+            SELECT COALESCE(
+                MAX(CASE WHEN company_count >= ? THEN fiscal_year END),
+                MAX(fiscal_year)
+            ) AS fiscal_year
+            FROM year_counts
         )
-        SELECT *
+        SELECT revenue.*
         FROM revenue
-        ORDER BY revenue DESC
+        JOIN latest_industry_year
+          ON revenue.fiscal_year = latest_industry_year.fiscal_year
+        ORDER BY revenue.revenue DESC
         LIMIT ?
     """
-    params.append(limit)
+    params.extend([limit, limit])
 
     conn = sqlite3.connect(store.db_path)
     conn.row_factory = sqlite3.Row
@@ -469,8 +475,18 @@ def _extract_industry(question: str) -> str:
     if any(term in question for term in ["방산", "방위산업", "국방", "항공우주", "우주항공"]):
         return "방산"
 
+    explicit_match = re.search(
+        r"^\s*(.+?)\s+(?:산업|업종|섹터)(?=(?:에서|의|내|중|별|에|으로)?(?:\s|$))",
+        question,
+    )
+    if explicit_match:
+        industry = explicit_match.group(1).strip(" ?.,!")
+        if len(industry) >= 2:
+            return industry
+
     # Clean conversational phrases and grab the core noun
     cleaned = question
+    cleaned = re.sub(r"\s*(?:산업|업종|섹터)(?:에서|의|내|중|별|에|으로)?.*$", "", cleaned)
     cleaned = re.sub(r"(?:의|을|를|이|가|은|는|에|에\s*대한|에\s*대해)\s+", " ", cleaned)
     cleaned = re.sub(r"(?:대표기업|대표회사|대표종목|대표|상위|관련|기업들|기업|회사|종목|알려줘|알려|알려주세요|알려줘요|알려주라|추천|추천해줘|분석|분석해줘|알아봐)\b.*", "", cleaned)
     cleaned = re.sub(r"[?.,!]", "", cleaned)
@@ -484,9 +500,14 @@ def _extract_industry(question: str) -> str:
 
 
 def _extract_limit(question: str) -> int:
-    match = re.search(r"상위\s*(\d+)", question)
-    if match:
-        return max(1, min(30, int(match.group(1))))
+    patterns = [
+        r"상위\s*(\d+)",
+        r"(\d+)\s*(?:개사|개\s*기업|개\s*회사|곳)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, question)
+        if match:
+            return max(1, min(30, int(match.group(1))))
     return 10
 
 

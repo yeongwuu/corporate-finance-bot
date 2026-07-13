@@ -517,7 +517,7 @@ def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any
         company = calculation.get("company") or {}
         base = float(calculation.get("base_operating_income") or 0)
         scenario = float(calculation.get("scenario_operating_income") or 0)
-        return {"type": "bar", "title": f"{company.get('company_name', '기업')} 영업이익 시나리오", "subtitle": "기준 대비 금리·환율 복합 충격", "unit": "KRW", "bars": [{"key": "base", "label": "기준", "value": base, "display": _format_amount(base)}, {"key": "scenario", "label": "충격 후", "value": scenario, "display": _format_amount(scenario)}]}
+        return {"type": "bar", "title": f"{company.get('company_name', '기업')} 영업이익 시나리오", "subtitle": "기준 대비 금리·환율 복합 충격", "unit": "KRW", "bars": [{"key": "base", "label": "기준", "value": base, "display": _format_amount(base), "color": "#FEA278"}, {"key": "scenario", "label": "충격 후", "value": scenario, "display": _format_amount(scenario), "color": "#FF530A"}]}
     if mode == "multi_factor_stress":
         company = calculation.get("company") or {}
         base = float(calculation.get("base_operating_income") or 0)
@@ -528,7 +528,7 @@ def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any
             "title": f"{company.get('company_name', '기업')} 복합 스트레스 테스트",
             "subtitle": "환율·금리·반도체 가격 동시 충격",
             "unit": "KRW",
-            "bars": [{"key": "base", "label": "기준 영업이익", "value": base, "display": _format_amount(base)}, {"key": "stress", "label": "스트레스 영업이익", "value": scenario, "display": _format_amount(scenario)}],
+            "bars": [{"key": "base", "label": "기준 영업이익", "value": base, "display": _format_amount(base), "color": "#FEA278"}, {"key": "stress", "label": "스트레스 영업이익", "value": scenario, "display": _format_amount(scenario), "color": "#FF530A"}],
             "table": {"caption": "충격별 영업이익 영향", "headers": ["위험 요인", "충격 가정", "영업이익 영향"], "rows": [[row["factor"], row["shock"], f"{row['income_effect']*100:+.2f}%"] for row in factors]},
         }
     return None

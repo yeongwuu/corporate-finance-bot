@@ -311,7 +311,8 @@ def _latest_completed_close_date(now: datetime | None = None) -> date:
 
 def _to_yahoo_ticker(stock_code: str, market: str | None) -> str:
     code = stock_code.zfill(6)
-    if market and "KOSDAQ" in market.upper():
+    normalized_market = (market or "").upper()
+    if "KOSDAQ" in normalized_market or "코스닥" in (market or ""):
         return f"{code}.KQ"
     return f"{code}.KS"
 
