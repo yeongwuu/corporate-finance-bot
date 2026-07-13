@@ -449,10 +449,15 @@ def select_tool(question: str) -> str:
 
     if (
         any(token in compact for token in ["몬테카를로", "기대수익률분포", "유리할확률"])
+        or ("wacc" in compact and "영구성장률" in compact and "민감도" in compact)
+        or ("환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]))
         or ("기준금리" in compact and "환율" in compact)
         or (any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf"]) and any(token in compact for token in ["적정주가", "기업가치", "fcf"]))
     ):
         return "advanced_analysis_tool"
+
+    if "포트폴리오" in compact and any(token in compact for token in ["최대샤프", "최소분산", "최적비중", "최적화"]):
+        return "portfolio_tool"
 
     if any(word in normalized for word in ["블랙숄즈", "black-scholes", "blackscholes", "콜옵션", "풋옵션", "옵션가격", "옵션 가치", "옵션가치", "그리스", "델타", "감마", "세타", "베가", "로"]) and any(word in normalized for word in ["계산", "구해줘", "이론가격", "산출", "그리스값", "옵션"]):
         return "bsm_calculator_tool"

@@ -1385,6 +1385,7 @@ function ChartPanel({ chart, compact = false }) {
       {chart.type === "line" ? <LineChart chart={chart} /> : null}
       {chart.type === "bar" ? <BarChart chart={chart} /> : null}
       {chart.type === "compact_metric_bar" ? <CompactMetricBarChart chart={chart} /> : null}
+      {chart.table ? <ChartDataTable table={chart.table} /> : null}
       {chart.range ? (
         <div className="forecast-range" aria-label="전망 범위">
           <span>보수 {chart.range.low}</span>
@@ -1453,6 +1454,8 @@ function LineChart({ chart }) {
       dataZoom: totalPoints > 40 ? [{ type: "inside", start: 60, end: 100 }, { type: "slider", height: 14, bottom: 4, borderColor: "transparent", fillerColor: "rgba(208,74,2,.12)" }] : [],
       series: chart.datasets.map((dataset, index) => {
         const maxPoint = dataset.points.reduce((max, point) => Number(point.y) > Number(max.y) ? point : max, dataset.points[0]);
+        const maxPointIndex = dataset.points.indexOf(maxPoint);
+        const maxLabelPosition = maxPointIndex === 0 ? "right" : maxPointIndex === dataset.points.length - 1 ? "left" : "top";
         return {
           name: dataset.label,
           type: "line",
@@ -1468,7 +1471,7 @@ function LineChart({ chart }) {
             symbol: "circle",
             symbolSize: 11,
             itemStyle: { color: "#ffffff", borderColor: colors[index % colors.length], borderWidth: 3 },
-            label: { show: true, position: "top", distance: 7, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: maxPoint.display },
+            label: { show: true, position: maxLabelPosition, distance: 8, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: maxPoint.display },
             data: [{ coord: [maxPoint.label || String(maxPoint.x), Number(maxPoint.y)], value: Number(maxPoint.y), name: "최댓값" }],
           } : undefined,
         };
@@ -1476,6 +1479,26 @@ function LineChart({ chart }) {
     };
   }, [chart]);
   return <EChart option={option} ariaLabel={chart.title || "재무 추이 선 그래프"} />;
+}
+
+function ChartDataTable({ table }) {
+  return (
+    <div className="chart-data-table-wrap">
+      {table.caption ? <strong className="chart-data-table-caption">{table.caption}</strong> : null}
+      <table className="chart-data-table">
+        <thead>
+          <tr>{table.headers.map((header) => <th key={header}>{header}</th>)}</tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, rowIndex) => (
+            <tr key={`${row[0]}-${rowIndex}`}>
+              {row.map((cell, cellIndex) => <td key={`${cellIndex}-${cell}`}>{cell}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function shouldSplitChartByScale(chart) {

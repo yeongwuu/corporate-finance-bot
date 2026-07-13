@@ -170,6 +170,10 @@ class DartClient:
         corp_name: str | None = None,
         fiscal_year: int | None = None,
     ) -> dict[str, Any]:
+        cached = self._find_cached_business_report(corp_name, fiscal_year)
+        if cached:
+            return cached
+
         report = self.find_business_report(stock_code=stock_code, corp_name=corp_name, fiscal_year=fiscal_year)
         if not report:
             return {
@@ -177,10 +181,19 @@ class DartClient:
                 "message": "조건에 맞는 사업보고서를 찾지 못했습니다.",
             }
 
-        text = self.download_document(report.rcept_no)
-        filtered = _extract_relevant_sections(text)
         file_name = f"{_safe_filename(report.corp_name)}_{fiscal_year or report.rcept_date[:4]}_{report.rcept_no}.md"
         output_path = self.external_docs_dir / file_name
+        if output_path.exists():
+            return {
+                "status": "ok",
+                "report": report.__dict__,
+                "path": str(output_path),
+                "chars": len(output_path.read_text(encoding="utf-8")),
+                "cached": True,
+            }
+
+        text = self.download_document(report.rcept_no)
+        filtered = _extract_relevant_sections(text)
         output_path.write_text(
             "\n".join(
                 [
@@ -203,6 +216,39 @@ class DartClient:
             "report": report.__dict__,
             "path": str(output_path),
             "chars": len(filtered),
+        }
+
+    def _find_cached_business_report(
+        self,
+        corp_name: str | None,
+        fiscal_year: int | None,
+    ) -> dict[str, Any] | None:
+        if not corp_name or not fiscal_year:
+            return None
+        candidates = sorted(
+            self.external_docs_dir.glob(f"{_safe_filename(corp_name)}_{fiscal_year}_*.md"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            return None
+        path = candidates[0]
+        text = path.read_text(encoding="utf-8")
+        metadata = _parse_document_metadata(text)
+        return {
+            "status": "ok",
+            "report": {
+                "corp_code": metadata.get("corp_code", ""),
+                "corp_name": metadata.get("company", corp_name),
+                "stock_code": metadata.get("stock_code", ""),
+                "report_name": f"사업보고서 ({fiscal_year}.12)",
+                "rcept_no": metadata.get("rcept_no", ""),
+                "rcept_date": metadata.get("rcept_date", ""),
+                "corp_cls": "",
+            },
+            "path": str(path),
+            "chars": len(text),
+            "cached": True,
         }
 
     def fetch_financial_accounts(
@@ -327,6 +373,15 @@ def _extract_relevant_sections(text: str, max_chars: int = 120_000) -> str:
         "매출에 관한 사항",
         "원재료",
         "생산설비",
+        "설비투자",
+        "자본적지출",
+        "CapEx",
+        "CAPEX",
+        "운전자본",
+        "재고자산",
+        "매출채권",
+        "매입채무",
+        "현금흐름",
         "위험관리",
         "연구개발",
         "부문정보",
@@ -347,6 +402,15 @@ def _extract_relevant_sections(text: str, max_chars: int = 120_000) -> str:
 
 def _safe_filename(value: str) -> str:
     return re.sub(r"[^가-힣A-Za-z0-9_.-]+", "_", value).strip("_") or "dart_report"
+
+
+def _parse_document_metadata(text: str) -> dict[str, str]:
+    metadata = {}
+    for line in text.splitlines()[:20]:
+        if line.startswith("- ") and ":" in line:
+            key, value = line[2:].split(":", 1)
+            metadata[key.strip()] = value.strip()
+    return metadata
 
 
 def _compact(value: str) -> str:

@@ -908,7 +908,7 @@ def format_thousand_won(value: Decimal) -> str:
 
 def is_portfolio_optimization_question(question: str) -> bool:
     compact = question.replace(" ", "").lower()
-    return any(token in compact for token in ["최적화", "최적투자비중", "최적비중", "샤프지수극대화", "샤프비율극대화", "포트폴리오최적"])
+    return any(token in compact for token in ["최적화", "최적투자비중", "최적비중", "샤프지수극대화", "샤프비율극대화", "최대샤프", "최소분산포트폴리오", "포트폴리오최적"])
 
 
 def calculate_optimal_portfolio(question: str) -> dict:
@@ -922,12 +922,12 @@ def calculate_optimal_portfolio(question: str) -> dict:
     
     store = FinancialStatementStore()
     
-    # Extract multiple company candidates using delimiters
-    chunks = re.split(r"\s*(?:와|과|랑|하고|및|vs\.?|VS|비교|,)\s*", question)
+    # Extract multiple company candidates using delimiters.
+    chunks = re.split(r"\s*(?:·|와|과|랑|하고|및|vs\.?|VS|비교|,)\s*", question)
     companies = []
     seen = set()
     for chunk in chunks:
-        cleaned_chunk = re.sub(r"(?:의|최적화|최적|포트폴리오|비중|구해줘|알려줘|분석해줘)", "", chunk).strip()
+        cleaned_chunk = re.sub(r"(?:의|최근\s*\d+년|주가|이용해|최대|최소분산|샤프지수|최적화|최적|포트폴리오|비중|구성해줘|구해줘|알려줘|분석해줘)", "", chunk).strip()
         if not cleaned_chunk or len(cleaned_chunk) < 2:
             continue
         try:
@@ -937,55 +937,53 @@ def calculate_optimal_portfolio(question: str) -> dict:
                 companies.append(company)
         except Exception:
             pass
+
+    aliases = {"현대차": "현대자동차", "하이닉스": "SK하이닉스"}
+    for alias, canonical in aliases.items():
+        if alias not in question:
+            continue
+        company = store.resolve_company(canonical)
+        if company and company.stock_code not in seen:
+            seen.add(company.stock_code)
+            companies.append(company)
             
-    # Default to 5 major companies if insufficient companies are resolved
+    # Ask for explicit companies instead of silently substituting unrelated assets.
     if len(companies) < 2:
-        default_names = ["삼성전자", "현대차", "SK하이닉스", "네이버", "셀트리온"]
-        companies = []
-        seen.clear()
-        for name in default_names:
-            company = store.resolve_company(name)
-            if company and company.stock_code not in seen:
-                seen.add(company.stock_code)
-                companies.append(company)
+        return {"status": "needs_company", "summary": "포트폴리오를 구성할 기업을 두 개 이상 지정해 주세요.", "steps": []}
 
     end_date = date.today()
-    start_date = end_date - timedelta(days=365)
+    years_match = re.search(r"최근\s*(\d+)\s*년", question)
+    analysis_years = max(1, min(10, int(years_match.group(1)))) if years_match else 5
+    start_date = end_date - timedelta(days=365 * analysis_years + 15)
     
     price_series = {}
     steps = [
         f"최적화 대상 기업 ({len(companies)}개사): " + ", ".join(c.company_name for c in companies),
-        f"분석 기간: {start_date} ~ {end_date} (최근 1개년)"
+        f"분석 기간: {start_date} ~ {end_date} (최근 {analysis_years}년)"
     ]
     
     for comp in companies:
         try:
-            df = _download_naver_price_data(comp.stock_code, start_date, end_date)
-            if df.empty:
-                ticker = _to_yahoo_ticker(comp.stock_code, comp.market)
-                df = _download_price_data(ticker, start_date, end_date)
-            if not df.empty:
+            ticker = _to_yahoo_ticker(comp.stock_code, comp.market)
+            df = _download_price_data(ticker, start_date, end_date)
+            if df is None or df.empty:
+                df = _download_naver_price_data(comp.stock_code, start_date, end_date)
+            if df is not None and not df.empty:
                 if isinstance(df, list):
                     df = pd.DataFrame(df)
-                if "date" in df.columns:
-                    df.set_index("date", inplace=True)
-                price_series[comp.company_name] = df["close"]
+                close_column = "Close" if "Close" in df.columns else "close" if "close" in df.columns else None
+                if close_column:
+                    price_series[comp.company_name] = pd.to_numeric(df[close_column], errors="coerce")
         except Exception:
             pass
             
     if len(price_series) < 2:
-        steps.append("실시간 데이터 조회 실패로 내부 재무제표 기준 Mock 가격 추이 시뮬레이션을 대체 적용합니다.")
-        dates = pd.date_range(end=end_date, periods=252, freq="B")
-        for i, comp in enumerate(companies):
-            np.random.seed(42 + i)
-            mu = 0.05 + 0.02 * i
-            vol = 0.15 + 0.03 * i
-            daily_returns = np.random.normal(mu / 252, vol / np.sqrt(252), 252)
-            prices = 100000 * np.exp(np.cumsum(daily_returns))
-            price_series[comp.company_name] = pd.Series(prices, index=dates)
+        return {"status": "no_data", "summary": "최적화에 필요한 실제 주가 데이터를 두 종목 이상 확보하지 못했습니다.", "steps": steps}
             
-    df_prices = pd.DataFrame(price_series).ffill().dropna()
+    df_prices = pd.DataFrame(price_series).sort_index().ffill().dropna()
     df_returns = df_prices.pct_change().dropna()
+    if len(df_returns) < 252:
+        return {"status": "no_data", "summary": "포트폴리오 최적화에 필요한 공통 거래일이 부족합니다.", "steps": steps}
     
     mean_returns = df_returns.mean() * 252
     cov_matrix = df_returns.cov() * 252
@@ -998,32 +996,48 @@ def calculate_optimal_portfolio(question: str) -> dict:
         if p_vol == 0:
             return 0
         return -(p_return - rf) / p_vol
+
+    def portfolio_variance(weights):
+        return float(np.dot(weights.T, np.dot(cov_matrix, weights)))
         
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
     bounds = tuple((0.0, 1.0) for _ in range(num_assets))
     init_weights = np.array(num_assets * [1.0 / num_assets])
     
     res = minimize(negative_sharpe, init_weights, method="SLSQP", bounds=bounds, constraints=constraints)
+    min_var_res = minimize(portfolio_variance, init_weights, method="SLSQP", bounds=bounds, constraints=constraints)
     
     optimal_weights = res.x if res.success else init_weights
     opt_return = np.dot(optimal_weights, mean_returns)
     opt_vol = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
     opt_sharpe = (opt_return - rf) / opt_vol if opt_vol > 0 else 0
+    min_var_weights = min_var_res.x if min_var_res.success else init_weights
+    min_var_return = np.dot(min_var_weights, mean_returns)
+    min_var_vol = np.sqrt(portfolio_variance(min_var_weights))
+    min_var_sharpe = (min_var_return - rf) / min_var_vol if min_var_vol > 0 else 0
     
     for name, w in zip(df_prices.columns, optimal_weights):
-        steps.append(f"최적 가중치 - {name}: {w*100:.2f}%")
+        min_weight = min_var_weights[list(df_prices.columns).index(name)]
+        steps.append(f"{name}: 최대 샤프 {w*100:.2f}%, 최소분산 {min_weight*100:.2f}%")
         
     steps.append(f"최적 포트폴리오 연율화 기대수익률: {opt_return*100:.2f}%")
     steps.append(f"최적 포트폴리오 연율화 표준편차(위험): {opt_vol*100:.2f}%")
     steps.append(f"최대 샤프 비율 (Sharpe Ratio): {opt_sharpe:.4f}")
+    steps.append(f"최소분산 포트폴리오 연율화 기대수익률 {min_var_return*100:.2f}%, 변동성 {min_var_vol*100:.2f}%, 샤프 비율 {min_var_sharpe:.4f}")
     
     return {
         "status": "ok",
         "mode": "portfolio_optimization",
-        "summary": f"SciPy 이차계획법(QP) 최적화를 통해 샤프비율을 극대화하는 자산 투자 비중을 산출했습니다.",
+        "summary": "실제 주가 수익률로 최대 샤프지수 및 최소분산 포트폴리오를 구성했습니다.",
         "steps": steps,
         "weights": {name: float(w) for name, w in zip(df_prices.columns, optimal_weights)},
         "expected_return": float(opt_return),
         "volatility": float(opt_vol),
         "sharpe_ratio": float(opt_sharpe),
+        "min_variance_weights": {name: float(w) for name, w in zip(df_prices.columns, min_var_weights)},
+        "min_variance_expected_return": float(min_var_return),
+        "min_variance_volatility": float(min_var_vol),
+        "min_variance_sharpe_ratio": float(min_var_sharpe),
+        "analysis_years": analysis_years,
+        "observations": len(df_returns),
     }

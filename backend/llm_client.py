@@ -1059,21 +1059,25 @@ def build_bsm_calculator_answer(calculation: dict) -> str:
 
 def build_portfolio_optimization_answer(calculation: dict) -> str:
     weights = calculation.get("weights") or {}
-    weight_lines = [f"- **{name}**: **{w*100:.2f}%**" for name, w in weights.items()]
+    min_weights = calculation.get("min_variance_weights") or {}
+    weight_lines = [f"- **{name}**: 최대 샤프 **{w*100:.2f}%**, 최소분산 **{min_weights.get(name, 0)*100:.2f}%**" for name, w in weights.items()]
     
     lines = [
-        "### 📈 SciPy 포트폴리오 최적화 (Sharpe Ratio 최대화)",
+        "### 📈 포트폴리오 최적화 결과",
         "",
-        "현대 포트폴리오 이론(MPT)에 기반하여, 주어진 자산들의 최근 1개년 역사적 수익률 추이를 토대로 무위험자산(금리 3.5%) 대비 **샤프비율(Sharpe Ratio)을 극대화**하는 최적 투자 비중을 산출했습니다.",
+        f"최근 {calculation.get('analysis_years', 5)}년 실제 일별 주가 수익률을 이용해 최대 샤프지수 포트폴리오와 최소분산 포트폴리오를 함께 산출했습니다.",
         "",
-        "#### 1. 최적 자산 배분 비중 (Optimal Weights)",
+        "#### 1. 포트폴리오별 자산 배분 비중",
         *weight_lines,
         "",
         "#### 2. 포트폴리오 기대 성과 요약",
         f"- **연율화 기대수익률 (Expected Return)**: **{calculation.get('expected_return')*100:.2f}%**",
         f"- **연율화 표준편차 (Portfolio Risk)**: **{calculation.get('volatility')*100:.2f}%**",
         f"- **포트폴리오 Sharpe Ratio**: **{calculation.get('sharpe_ratio'):.4f}**",
+        f"- **최소분산 기대수익률**: **{calculation.get('min_variance_expected_return')*100:.2f}%**",
+        f"- **최소분산 표준편차**: **{calculation.get('min_variance_volatility')*100:.2f}%**",
+        f"- **최소분산 Sharpe Ratio**: **{calculation.get('min_variance_sharpe_ratio'):.4f}**",
         "",
-        "이 분석 결과는 과거 1개년 일일 수익률 추종 데이터를 통해 SciPy의 순차적 이차계획법(SLSQP) 최적화 알고리즘을 거쳐 도출된 수치이며, 향후 시장의 변동성과 미래 수익률을 보증하지 않습니다."
+        f"총 {calculation.get('observations', 0):,}개 공통 거래일을 사용한 SLSQP 최적화 결과이며, 공매도는 허용하지 않고 비중 합계는 100%로 제한했습니다. 과거 수익률은 미래 성과를 보장하지 않습니다."
     ]
     return "\n".join(lines)

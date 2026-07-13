@@ -20,7 +20,7 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
-    if calculation.get("mode") in {"advanced_dcf", "monte_carlo_comparison", "macro_scenario"}:
+    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "multi_factor_stress"}:
         return _build_advanced_analysis_chart(calculation)
     if calculation.get("mode") == "stock_price_comparison":
         return _build_stock_price_comparison_chart(calculation)
@@ -410,28 +410,25 @@ def _build_rf_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any
 
 def _build_portfolio_optimization_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
     weights = calculation.get("weights") or {}
-    points = []
-    for name, w in weights.items():
-        points.append({
-            "x": name,
-            "y": float(w * 100),
-            "label": name,
-            "display": f"{w * 100:.2f}%"
-        })
-    if not points:
+    min_weights = calculation.get("min_variance_weights") or {}
+    bars = []
+    for name, weight in weights.items():
+        bars.append({"key": f"sharpe-{name}", "label": f"최대 샤프 · {name}", "value": float(weight * 100), "display": f"{weight * 100:.2f}%"})
+    for name, weight in min_weights.items():
+        bars.append({"key": f"minvar-{name}", "label": f"최소분산 · {name}", "value": float(weight * 100), "display": f"{weight * 100:.2f}%"})
+    if not bars:
         return None
     return {
         "type": "bar",
-        "title": "최적 포트폴리오 자산 배분 비중",
-        "subtitle": "샤프 비율 극대화 기준",
-        "unit": "%",
-        "datasets": [
-            {
-                "key": "weights",
-                "label": "투자 비중",
-                "points": points
-            }
-        ]
+        "title": "최적 포트폴리오 자산 배분 비교",
+        "subtitle": f"실제 최근 {calculation.get('analysis_years', 5)}년 일별 수익률 기준",
+        "unit": "PERCENT",
+        "bars": bars,
+        "table": {
+            "caption": "포트폴리오별 투자 비중",
+            "headers": ["기업", "최대 샤프", "최소분산"],
+            "rows": [[name, f"{weight*100:.2f}%", f"{min_weights.get(name, 0)*100:.2f}%"] for name, weight in weights.items()],
+        },
     }
 
 
@@ -477,11 +474,39 @@ def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any
     mode = calculation.get("mode")
     if mode == "advanced_dcf":
         company = calculation.get("company") or {}
+        projections = calculation.get("projections") or []
         points = [
             {"x": index, "y": float(row["fcf"]), "label": f"{row['year']}년", "display": _format_amount(float(row["fcf"]))}
-            for index, row in enumerate(calculation.get("projections") or [])
+            for index, row in enumerate(projections)
         ]
-        return {"type": "line", "title": f"{company.get('company_name', '기업')} 10년 FCF 전망", "subtitle": "가정 기반 기준 시나리오", "unit": "KRW", "datasets": [{"key": "fcf", "label": "FCF", "points": points}]} if points else None
+        table = {
+            "caption": "연도별 FCF 추정치",
+            "headers": ["연도", "영업이익(EBIT)", "FCF", "현재가치(PV)"],
+            "rows": [
+                [
+                    f"{row['year']}년",
+                    _format_amount(float(row["ebit"])),
+                    _format_amount(float(row["fcf"])),
+                    _format_amount(float(row["pv"])),
+                ]
+                for row in projections
+            ],
+        }
+        return {"type": "line", "title": f"{company.get('company_name', '기업')} 10년 FCF 전망", "subtitle": "가정 기반 기준 시나리오", "unit": "KRW", "datasets": [{"key": "fcf", "label": "FCF", "points": points}], "table": table} if points else None
+    if mode == "dcf_sensitivity":
+        company = calculation.get("company") or {}
+        growth_values = calculation.get("growth_values") or []
+        rows = calculation.get("sensitivity") or []
+        table_rows = [
+            [f"{row['wacc']:.1f}%", *[f"{price:,.0f}원" if price is not None else "-" for price in row["prices"]]]
+            for row in rows
+        ]
+        return {
+            "type": "table_only",
+            "title": f"{company.get('company_name', '기업')} DCF 민감도",
+            "subtitle": "WACC × 영구성장률별 주당 적정가치",
+            "table": {"caption": "적정 주가 민감도 표", "headers": ["WACC / 영구성장률", *[f"{value:.1f}%" for value in growth_values]], "rows": table_rows},
+        }
     if mode == "monte_carlo_comparison":
         bars = []
         for item in calculation.get("simulations") or []:
@@ -493,4 +518,17 @@ def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any
         base = float(calculation.get("base_operating_income") or 0)
         scenario = float(calculation.get("scenario_operating_income") or 0)
         return {"type": "bar", "title": f"{company.get('company_name', '기업')} 영업이익 시나리오", "subtitle": "기준 대비 금리·환율 복합 충격", "unit": "KRW", "bars": [{"key": "base", "label": "기준", "value": base, "display": _format_amount(base)}, {"key": "scenario", "label": "충격 후", "value": scenario, "display": _format_amount(scenario)}]}
+    if mode == "multi_factor_stress":
+        company = calculation.get("company") or {}
+        base = float(calculation.get("base_operating_income") or 0)
+        scenario = float(calculation.get("scenario_operating_income") or 0)
+        factors = calculation.get("stress_factors") or []
+        return {
+            "type": "bar",
+            "title": f"{company.get('company_name', '기업')} 복합 스트레스 테스트",
+            "subtitle": "환율·금리·반도체 가격 동시 충격",
+            "unit": "KRW",
+            "bars": [{"key": "base", "label": "기준 영업이익", "value": base, "display": _format_amount(base)}, {"key": "stress", "label": "스트레스 영업이익", "value": scenario, "display": _format_amount(scenario)}],
+            "table": {"caption": "충격별 영업이익 영향", "headers": ["위험 요인", "충격 가정", "영업이익 영향"], "rows": [[row["factor"], row["shock"], f"{row['income_effect']*100:+.2f}%"] for row in factors]},
+        }
     return None
