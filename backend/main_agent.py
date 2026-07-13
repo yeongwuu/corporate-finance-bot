@@ -19,6 +19,7 @@ from tools.stock_price_tool import analyze_stock_price
 from tools.time_value_tool import analyze_time_value
 from tools.valuation_tool import analyze_valuation
 from tools.working_capital_tool import analyze_working_capital
+from tools.bsm_calculator_tool import calculate_bsm_option
 
 
 def answer_finance_question(
@@ -438,6 +439,9 @@ def select_tool(question: str) -> str:
     normalized = question.lower()
     compact = normalized.replace(" ", "")
 
+    if any(word in normalized for word in ["블랙숄즈", "black-scholes", "blackscholes", "콜옵션", "풋옵션", "옵션가격", "옵션 가치", "옵션가치", "그리스", "델타", "감마", "세타", "베가", "로"]) and any(word in normalized for word in ["계산", "구해줘", "이론가격", "산출", "그리스값", "옵션"]):
+        return "bsm_calculator_tool"
+
     # Definitions and account-composition questions do not require a company lookup.
     if _is_financial_statement_concept_question(normalized):
         return "finance_concept_tool"
@@ -506,8 +510,8 @@ def select_tool(question: str) -> str:
                 "주요 계정",
                 "기업 분석",
                 "회사 분석",
-                "코스닥",
-                "kosdaq",
+                "코스피",
+                "kospi",
                 "매출액",
                 "영업이익",
                 "당기순이익",
@@ -946,6 +950,8 @@ def _is_company_profitability_trend_question(normalized: str) -> bool:
 
 
 def run_tool(tool_name: str, question: str) -> dict:
+    if tool_name == "bsm_calculator_tool":
+        return calculate_bsm_option(question)
     if tool_name == "capital_budgeting_tool":
         return analyze_capital_budgeting(question)
     if tool_name == "company_analysis_tool":

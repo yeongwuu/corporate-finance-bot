@@ -211,6 +211,7 @@ frontend/dist/
 
 # Local data and generated financial statement cache
 KOSDAQ_financial_statements.full.xlsx
+KOSPI_financial_statements.full.xlsx
 backend/data/*.sqlite
 backend/data/*.sqlite-*
 backend/data/dart/

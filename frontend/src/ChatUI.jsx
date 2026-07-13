@@ -538,7 +538,7 @@ export default function ChatUI() {
             onClick={isLoading ? cancelMessage : undefined}
             data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다!"}
             aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end' }}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end', marginLeft: '2px' }}
           >
             {isLoading ? (
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -621,10 +621,30 @@ export default function ChatUI() {
 
 function buildFallbackRecommendedQuestions() {
   const newsQuestion = "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘";
-  const rest = FALLBACK_RECOMMENDED_QUESTIONS.filter((q) => q !== newsQuestion);
-  const shuffledRest = [...rest].sort(() => Math.random() - 0.5);
-  const selected = shuffledRest.slice(0, 4);
+  const kospi5 = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"];
+  
+  const pool = FALLBACK_RECOMMENDED_QUESTIONS.filter((q) => q !== newsQuestion);
+  const kospiQuestions = pool.filter((q) => kospi5.some((comp) => q.includes(comp)));
+  const otherQuestions = pool.filter((q) => !kospi5.some((comp) => q.includes(comp)));
+  
+  const selected = [];
   selected.push(newsQuestion);
+  
+  let chosenKospi = null;
+  if (kospiQuestions.length > 0) {
+    const shuffledKospi = [...kospiQuestions].sort(() => Math.random() - 0.5);
+    chosenKospi = shuffledKospi[0];
+    selected.push(chosenKospi);
+  }
+  
+  const remainingPool = [
+    ...kospiQuestions.filter((q) => q !== chosenKospi),
+    ...otherQuestions
+  ].sort(() => Math.random() - 0.5);
+  
+  const needed = 5 - selected.length;
+  selected.push(...remainingPool.slice(0, needed));
+  
   return selected.sort(() => Math.random() - 0.5);
 }
 
@@ -921,7 +941,8 @@ function buildPreview(content) {
 
 function shouldAskFeedbackConsent(data, answer) {
   const status = data?.calculation?.status || data?.status;
-  if (status === "ok") return false;
+  if (status === "ok" || status === "latest_news") return false;
+  
   const failureStatuses = new Set([
     "error",
     "missing_data",
@@ -932,6 +953,10 @@ function shouldAskFeedbackConsent(data, answer) {
   if (failureStatuses.has(status)) return true;
 
   const normalized = String(answer || "").replace(/\s+/g, " ");
+  if (normalized.includes("KDI") || normalized.includes("경제동향보고회") || normalized.includes("출처:")) {
+    return false;
+  }
+
   return [
     "찾지 못했습니다",
     "확인할 수 없습니다",
@@ -1503,9 +1528,24 @@ function EChart({ option, ariaLabel, height = 280 }) {
     if (!containerRef.current) return undefined;
     const instance = echarts.init(containerRef.current, null, { renderer: "svg" });
     instanceRef.current = instance;
-    const observer = new ResizeObserver(() => instance.resize());
+
+    const doResize = () => {
+      if (instanceRef.current) {
+        instanceRef.current.resize();
+      }
+    };
+
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(doResize);
+    });
     observer.observe(containerRef.current);
+
+    const timer = setTimeout(() => {
+      doResize();
+    }, 100);
+
     return () => {
+      clearTimeout(timer);
       observer.disconnect();
       instance.dispose();
       instanceRef.current = null;
@@ -1513,7 +1553,12 @@ function EChart({ option, ariaLabel, height = 280 }) {
   }, []);
 
   useEffect(() => {
-    instanceRef.current?.setOption(option, { notMerge: true });
+    if (instanceRef.current) {
+      instanceRef.current.setOption(option, { notMerge: true });
+      requestAnimationFrame(() => {
+        instanceRef.current?.resize();
+      });
+    }
   }, [option]);
 
   return <div ref={containerRef} className="echart" style={{ height }} role="img" aria-label={ariaLabel} />;

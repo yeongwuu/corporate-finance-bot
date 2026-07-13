@@ -103,7 +103,7 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
     except FileNotFoundError as exc:
         return {
             "status": "missing_data",
-            "summary": "KOSDAQ_financial_statements.xlsx 파일을 찾지 못했습니다.",
+            "summary": "KOSPI_financial_statements.xlsx 파일을 찾지 못했습니다.",
             "steps": [str(exc)],
         }
     if not company:
@@ -817,7 +817,7 @@ def _analyze_representative_sector_snapshot(
                 "company": {
                     "company_name": company_name,
                     "stock_code": stock_code,
-                    "market": "유가증권/코스닥",
+                    "market": "코스피(유가증권시장)",
                     "industry_name": industry,
                     "latest_year": fiscal_year,
                 },

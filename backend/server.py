@@ -299,7 +299,7 @@ def log_failed_question(question: str, status: str, error_message: str):
             logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return a fresh set with one news question while avoiding the previous set."""
+    """Return a fresh set with one news question and one KOSPI top 5 question while avoiding the previous set."""
     global _last_recommended_questions
     _init_questions_file()
     with _file_write_lock:
@@ -310,25 +310,45 @@ def _generate_guaranteed_questions() -> list[str]:
             questions = list(DEFAULT_SEEDS)
     
     questions = list(dict.fromkeys([*questions, *DEFAULT_SEEDS]))
+    kospi5 = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"]
+    
     with _question_cache_lock:
         available = [question for question in questions if question not in _last_recommended_questions]
         if len(available) < RECOMMENDED_QUESTION_COUNT:
             available = questions
+        
+        # 1. Extract news question
         news_candidates = [question for question in available if _is_news_api_question(question)]
         if not news_candidates:
             news_candidates = [question for question in questions if _is_news_api_question(question)]
         news_question = random.choice(news_candidates) if news_candidates else DEFAULT_SEEDS[-1]
-        regular_candidates = [question for question in available if question != news_question and not _is_news_api_question(question)]
-        if len(regular_candidates) < RECOMMENDED_QUESTION_COUNT - 1:
+        
+        # 2. Extract KOSPI top 5 question (excluding the selected news question)
+        remaining_pool = [q for q in available if q != news_question]
+        kospi_candidates = [q for q in remaining_pool if any(comp in q for comp in kospi5)]
+        if not kospi_candidates:
+            kospi_candidates = [q for q in questions if q != news_question and any(comp in q for comp in kospi5)]
+        kospi_question = random.choice(kospi_candidates) if kospi_candidates else None
+        
+        # 3. Gather regular candidates
+        regular_candidates = [q for q in remaining_pool if q != kospi_question and not _is_news_api_question(q)]
+        if len(regular_candidates) < RECOMMENDED_QUESTION_COUNT - 2:
             regular_candidates.extend(
-                question
-                for question in questions
-                if question != news_question and question not in regular_candidates
+                q for q in questions
+                if q != news_question and q != kospi_question and q not in regular_candidates
             )
-        selected = [news_question, *random.sample(
-            regular_candidates,
-            min(len(regular_candidates), RECOMMENDED_QUESTION_COUNT - 1),
-        )]
+            
+        selected = [news_question]
+        if kospi_question:
+            selected.append(kospi_question)
+            
+        needed = RECOMMENDED_QUESTION_COUNT - len(selected)
+        if needed > 0:
+            selected.extend(random.sample(
+                regular_candidates,
+                min(len(regular_candidates), needed)
+            ))
+            
         random.shuffle(selected)
         _last_recommended_questions = set(selected)
     return selected

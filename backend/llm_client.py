@@ -57,6 +57,11 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
             )
         return base_msg + " 다른 기업명이나 종목코드로 다시 시도해 주세요."
 
+    if tool_name == "bsm_calculator_tool" and calculation.get("status") == "ok":
+        return build_bsm_calculator_answer(calculation)
+    if calculation.get("mode") == "portfolio_optimization" and calculation.get("status") == "ok":
+        return build_portfolio_optimization_answer(calculation)
+        
     if calculation.get("status") == "latest_news":
         # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
         # and let LLM synthesize the news documents.
@@ -822,7 +827,7 @@ def build_analysis_prompt(question: str, tool_name: str, calculation: dict, refe
         "1. 사용자가 단순 사실 확인이나 특정 수치를 물으면 자연스러운 문단형 답변으로 짧게 답한다.\n"
         "2. calculation.conversation_context가 있으면 현재 질문이 이전 회사, 기간, 지표를 이어받는지 자연스럽게 판단한다.\n"
         "3. 근거 문서에 없는 산업명, 제품명, 업황 원인은 새로 만들어내지 않는다.\n"
-        "4. 자료가 부족하면 '현재 확보된 자료만으로는 단정하기 어렵다'고 말하고, 사용자가 바로 이해할 수 있는 범위에서만 설명한다.\n"
+        "4. 제공된 데이터(뉴스/RAG 등)를 활용하여 거시적 분석이나 업종 동향을 설명할 때는 굳이 '세부적인 정보나 개별 기업의 데이터가 부족하여 단정하기 어렵다'는 식의 한계를 시인하는 회피형 멘트나 방어적인 안내를 덧붙이지 마라. 확보된 자료 한도 내에서 최대한 확신을 주는 실무적인 애널리스트 톤으로만 조리 있게 기술하라.\n"
         "5. 뉴스나 공시 후보가 있으면 '뉴스에서는 ...'처럼 자연스럽게 연결하되 출처 시스템 이름을 노출하지 않는다.\n"
         "6. calculation.stats가 있으면 주가 백테스팅 결과로 보고, 기간 수익률, 평균, 표준편차, 변동성, 최대낙폭을 간결히 요약한다.\n"
         "7. 투자 추천, 목표주가, 매수/매도 의견은 내지 않는다.\n"
@@ -1002,3 +1007,55 @@ def _ssl_context() -> ssl.SSLContext | None:
         return ssl.create_default_context(cafile=certifi.where())
     except Exception:
         return None
+
+
+def build_bsm_calculator_answer(calculation: dict) -> str:
+    option_type = "콜(Call)" if calculation.get("option_type") == "call" else "풋(Put)"
+    
+    lines = [
+        f"### 📊 Black-Scholes {option_type} 옵션 가격 분석 결과",
+        "",
+        "블랙숄즈 가격 결정 모형(Black-Scholes-Merton Model)을 통하여 산출한 옵션 이론가격 및 민감도(Greeks) 분석 결과입니다.",
+        "",
+        "#### 1. 계산기준 (Parameters)",
+        f"- **기초자산 가격 (S)**: `{calculation.get('S'):,.2f}`",
+        f"- **행사 가격 (K)**: `{calculation.get('K'):,.2f}`",
+        f"- **잔존 만기 (T)**: {calculation.get('T_days'):.1f}일 ({calculation.get('T'):.4f}년)",
+        f"- **무위험 이자율 (r)**: {calculation.get('r')*100:.2f}%",
+        f"- **기초자산 변동성 (σ)**: {calculation.get('sigma')*100:.2f}%",
+        "",
+        "#### 2. 옵션 이론가 산출 결과",
+        f"- **{option_type} 옵션 가격**: **{calculation.get('price'):,.4f}**",
+        "",
+        "#### 3. 옵션 그리스 (Option Greeks)",
+        f"- **델타 (Delta, Δ)**: `{calculation.get('delta'):.4f}` (기초자산 가격 1포인트 변동 시 옵션 가격 변동폭)",
+        f"- **감마 (Gamma, Γ)**: `{calculation.get('gamma'):.4f}` (기초자산 가격 변동에 따른 델타의 민감도)",
+        f"- **세타 (Theta, Θ)**: `{calculation.get('theta'):.4f}` (하루 시간 경과에 따른 옵션 시간가치 감소분: 일평균 {-calculation.get('theta')/365.0:.4f})",
+        f"- **베가 (Vega, ν)**: `{calculation.get('vega'):.4f}` (기초자산 변동성 1% 변동 시 옵션 가격 변동폭)",
+        f"- **로 (Rho, ρ)**: `{calculation.get('rho'):.4f}` (금리 1% 변동 시 옵션 가격 변동폭)",
+        "",
+        "본 가격 및 그리스 산식은 연속 복리 무위험 금리와 불확정 로그정규분포를 가정한 표준 수리 모형(Norm.cdf)으로 산출되었습니다."
+    ]
+    return "\n".join(lines)
+
+
+def build_portfolio_optimization_answer(calculation: dict) -> str:
+    weights = calculation.get("weights") or {}
+    weight_lines = [f"- **{name}**: **{w*100:.2f}%**" for name, w in weights.items()]
+    
+    lines = [
+        "### 📈 SciPy 포트폴리오 최적화 (Sharpe Ratio 최대화)",
+        "",
+        "현대 포트폴리오 이론(MPT)에 기반하여, 주어진 자산들의 최근 1개년 역사적 수익률 추이를 토대로 무위험자산(금리 3.5%) 대비 **샤프비율(Sharpe Ratio)을 극대화**하는 최적 투자 비중을 산출했습니다.",
+        "",
+        "#### 1. 최적 자산 배분 비중 (Optimal Weights)",
+        *weight_lines,
+        "",
+        "#### 2. 포트폴리오 기대 성과 요약",
+        f"- **연율화 기대수익률 (Expected Return)**: **{calculation.get('expected_return')*100:.2f}%**",
+        f"- **연율화 표준편차 (Portfolio Risk)**: **{calculation.get('volatility')*100:.2f}%**",
+        f"- **포트폴리오 Sharpe Ratio**: **{calculation.get('sharpe_ratio'):.4f}**",
+        "",
+        "이 분석 결과는 과거 1개년 일일 수익률 추종 데이터를 통해 SciPy의 순차적 이차계획법(SLSQP) 최적화 알고리즘을 거쳐 도출된 수치이며, 향후 시장의 변동성과 미래 수익률을 보증하지 않습니다."
+    ]
+    return "\n".join(lines)

@@ -20,6 +20,8 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
+    if calculation.get("mode") == "portfolio_optimization":
+        return _build_portfolio_optimization_chart(calculation)
     if calculation.get("mode") == "rf_stock_forecast":
         return _build_rf_stock_forecast_chart(calculation)
     if tool_name == "company_trend_tool":
@@ -355,6 +357,33 @@ def _build_rf_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any
             {
                 "key": "close",
                 "label": "예상 종가" if points[-1]["forecast"] else "종가",
+                "points": points
+            }
+        ]
+    }
+
+
+def _build_portfolio_optimization_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    weights = calculation.get("weights") or {}
+    points = []
+    for name, w in weights.items():
+        points.append({
+            "x": name,
+            "y": float(w * 100),
+            "label": name,
+            "display": f"{w * 100:.2f}%"
+        })
+    if not points:
+        return None
+    return {
+        "type": "bar",
+        "title": "최적 포트폴리오 자산 배분 비중",
+        "subtitle": "샤프 비율 극대화 기준",
+        "unit": "%",
+        "datasets": [
+            {
+                "key": "weights",
+                "label": "투자 비중",
                 "points": points
             }
         ]

@@ -14,7 +14,7 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_EXCEL_PATH = PROJECT_ROOT / "KOSDAQ_financial_statements.xlsx"
+DEFAULT_EXCEL_PATH = PROJECT_ROOT / "KOSPI_financial_statements.xlsx"
 DEFAULT_DB_PATH = BACKEND_ROOT / "data" / "financials.sqlite"
 DEFAULT_PACKAGED_DB_PATH = BACKEND_ROOT / "data" / "financials.sqlite.gz"
 ACCOUNT_MAPPING_PATH = BACKEND_ROOT / "data" / "account_mapping.json"

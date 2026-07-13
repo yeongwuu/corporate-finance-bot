@@ -48,7 +48,7 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
     except FileNotFoundError as exc:
         return {
             "status": "missing_data",
-            "summary": "KOSDAQ_financial_statements.xlsx 파일을 찾지 못했습니다.",
+            "summary": "KOSPI_financial_statements.xlsx 파일을 찾지 못했습니다.",
             "steps": [str(exc)],
         }
 
@@ -70,7 +70,7 @@ def analyze_company_financials(question: str) -> dict[str, Any]:
     ratios = result["ratios"]
 
     steps = [
-        f"데이터 원천: KOSDAQ_financial_statements.xlsx -> backend/data/financials.sqlite 캐시",
+        f"데이터 원천: KOSPI_financial_statements.xlsx -> backend/data/financials.sqlite 캐시",
         f"조회 대상: {company['company_name']}({company['stock_code']}), {year}년 당기 기준",
     ]
     if company.get("market") or company.get("industry_name"):

@@ -195,10 +195,10 @@ h2 {
   max-width: 66%;
   padding: 10px 20px;
   border-radius: 24px;
-  background: var(--accent);
-  border-color: var(--accent);
+  background: #F2550A;
+  border-color: #F2550A;
   color: #ffffff;
-  box-shadow: 0 4px 16px rgba(208, 74, 2, 0.1);
+  box-shadow: 0 4px 16px rgba(242, 85, 10, 0.1);
 }
 
 .message.assistant {
@@ -667,8 +667,10 @@ h2 {
 
 .chart-card-stack {
   display: grid;
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
   margin-top: 14px;
+  width: 100%;
 }
 
 .echart {
@@ -1157,7 +1159,7 @@ h2 {
 .hero-logo-title {
   font-size: 62px;
   font-weight: 800;
-  color: var(--accent);
+  color: #F2550A;
   margin-bottom: 38px;
   letter-spacing: 0;
   line-height: 1.03;

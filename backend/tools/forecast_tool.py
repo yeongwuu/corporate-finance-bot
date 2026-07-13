@@ -30,7 +30,7 @@ def forecast_company_metric(question: str) -> dict[str, Any]:
     except FileNotFoundError as exc:
         return {
             "status": "missing_data",
-            "summary": "KOSDAQ_financial_statements.xlsx 파일을 찾지 못했습니다.",
+            "summary": "KOSPI_financial_statements.xlsx 파일을 찾지 못했습니다.",
             "steps": [str(exc)],
         }
     if not company:
