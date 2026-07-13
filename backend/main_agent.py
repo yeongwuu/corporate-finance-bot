@@ -1,3 +1,4 @@
+import re
 import time
 from typing import Callable
 
@@ -88,6 +89,8 @@ def answer_finance_question(
 
     step_started = time.perf_counter()
     chart = build_chart_spec(tool_name, calculation)
+    if chart and chart.get("table"):
+        answer = _remove_markdown_tables(answer)
     trace.append(_trace_item("그래프 구성", "표시할 그래프를 생성했습니다." if chart else "표시할 그래프가 필요한 질문은 아니었습니다.", step_started))
     trace.append(_trace_item("전체 처리 완료", f"총 {((time.perf_counter() - started_at) * 1000):.0f}ms가 걸렸습니다.", started_at))
 
@@ -100,6 +103,40 @@ def answer_finance_question(
         "chart": chart,
         "trace": trace,
     }
+
+
+def _remove_markdown_tables(text: str) -> str:
+    """Remove Markdown tables when the same data is rendered as a structured chart table."""
+    lines = text.splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        if (
+            index + 1 < len(lines)
+            and _looks_like_markdown_table_row(lines[index])
+            and _looks_like_markdown_table_separator(lines[index + 1])
+        ):
+            index += 2
+            while index < len(lines) and _looks_like_markdown_table_row(lines[index]):
+                index += 1
+            continue
+        kept.append(lines[index])
+        index += 1
+    cleaned = "\n".join(kept)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _looks_like_markdown_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 3
+
+
+def _looks_like_markdown_table_separator(line: str) -> bool:
+    stripped = line.strip()
+    if not _looks_like_markdown_table_row(stripped):
+        return False
+    cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
 
 
 def answer_attachment_question(question: str, attachment: dict, started_at: float | None = None) -> dict:

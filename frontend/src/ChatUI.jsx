@@ -1420,13 +1420,13 @@ function LineChart({ chart }) {
     const labels = [...new Map(
       chart.datasets.flatMap((dataset) => dataset.points.map((point) => [String(point.x), point.label || String(point.x)]))
     ).values()];
-    const totalPoints = chart.datasets.reduce((count, dataset) => count + dataset.points.length, 0);
+    const hasInitialZoom = labels.length >= 4;
     return {
       animationDuration: 650,
       animationEasing: "cubicOut",
       color: colors,
       aria: { enabled: true, decal: { show: false } },
-      grid: { top: chart.datasets.length > 1 ? 54 : 30, right: 26, bottom: totalPoints > 20 ? 58 : 34, left: 72, containLabel: false },
+      grid: { top: chart.datasets.length > 1 ? 54 : 30, right: 26, bottom: hasInitialZoom ? 58 : 34, left: 72, containLabel: false },
       legend: chart.datasets.length > 1 ? {
         top: 4,
         right: 8,
@@ -1468,7 +1468,10 @@ function LineChart({ chart }) {
         axisLabel: { color: "#796b63", fontSize: 10, formatter: (value) => formatChartValue(Number(value), chart.unit) },
         splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
       },
-      dataZoom: totalPoints > 40 ? [{ type: "inside", start: 60, end: 100 }, { type: "slider", height: 14, bottom: 4, borderColor: "transparent", fillerColor: "rgba(208,74,2,.12)" }] : [],
+      dataZoom: hasInitialZoom ? [
+        { type: "inside", start: 50, end: 100 },
+        { type: "slider", start: 50, end: 100, height: 14, bottom: 4, borderColor: "transparent", fillerColor: "rgba(208,74,2,.12)" },
+      ] : [],
       series: chart.datasets.map((dataset, index) => {
         const maxPoint = dataset.points.reduce((max, point) => Number(point.y) > Number(max.y) ? point : max, dataset.points[0]);
         const maxPointIndex = dataset.points.indexOf(maxPoint);
