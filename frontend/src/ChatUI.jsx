@@ -30,9 +30,30 @@ const API_URL =
   import.meta.env?.VITE_API_URL ||
   (API_HOSTNAME ? `https://${API_HOSTNAME}` : "http://localhost:8000");
 
+function formatMessageTimestamp(dateObj) {
+  const hours = dateObj.getHours();
+  const minutes = dateObj.getMinutes();
+  const ampm = hours >= 12 ? "오후" : "오전";
+  const displayHours = hours % 12 || 12;
+  const displayMinutes = minutes.toString().padStart(2, "0");
+  
+  const today = new Date();
+  const isToday =
+    dateObj.getDate() === today.getDate() &&
+    dateObj.getMonth() === today.getMonth() &&
+    dateObj.getFullYear() === today.getFullYear();
+    
+  if (isToday) {
+    return `오늘 ${ampm} ${displayHours}:${displayMinutes}`;
+  } else {
+    return `${dateObj.getMonth() + 1}월 ${dateObj.getDate()}일 ${ampm} ${displayHours}:${displayMinutes}`;
+  }
+}
+
 const INITIAL_MESSAGE = {
   role: "assistant",
   content: "안녕하세요. 기업재무 챗봇입니다. 무엇이 궁금하세요?",
+  timestamp: formatMessageTimestamp(new Date()),
   meta: {
     tool: "ready",
     status: "ok",
@@ -72,7 +93,7 @@ export default function ChatUI() {
     if (displayedActiveStep < activeStep) {
       const timer = setTimeout(() => {
         setDisplayedActiveStep((prev) => prev + 1);
-      }, 1000);
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [activeStep, displayedActiveStep, isLoading]);
@@ -173,6 +194,7 @@ export default function ChatUI() {
       {
         role: "user",
         content: attachment ? `${displayQuestion}\n\n첨부파일: ${attachment.name}` : displayQuestion,
+        timestamp: formatMessageTimestamp(new Date()),
       },
     ];
 
@@ -272,6 +294,7 @@ export default function ChatUI() {
         {
           role: "assistant",
           content: answer,
+          timestamp: formatMessageTimestamp(new Date()),
           meta: {
             animate: true,
             tool: data.tool,
@@ -308,6 +331,7 @@ export default function ChatUI() {
         {
           role: "assistant",
           content: answer,
+          timestamp: formatMessageTimestamp(new Date()),
           meta: {
             animate: true,
             tool: error.name === "AbortError" ? "cancelled" : "network",
@@ -458,20 +482,25 @@ export default function ChatUI() {
           {messages
             .filter((msg, idx) => !(idx === 0 && msg.role === "assistant"))
             .map((message, index) => (
-              <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-                <MessageText message={message} onAskSuggestion={sendMessage} />
-              </article>
+              <div key={`${message.role}-${index}`} className="message-container" style={{ display: 'flex', flexDirection: 'column', width: '100%', marginBottom: '12px' }}>
+                {message.timestamp && (
+                  <span className="message-time-label" style={{
+                    fontSize: '11px',
+                    color: 'var(--text-muted)',
+                    alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start',
+                    margin: '4px 12px 2px',
+                  }}>
+                    {message.timestamp}
+                  </span>
+                )}
+                <article className={`message ${message.role}`}>
+                  <MessageText message={message} onAskSuggestion={sendMessage} />
+                </article>
+              </div>
             ))}
 
           {isLoading ? (
-            <article className="message assistant loading">
-              <div className="message-loading-header" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
-                <span className="loading-status">
-                  <span aria-hidden="true" className="hourglass">⌛</span>
-                  <span>{elapsedSeconds}s</span>
-                  <span>working...</span>
-                </span>
-              </div>
+            <article className="message assistant loading" style={{ paddingTop: '2px', paddingBottom: '2px', marginTop: '4px' }}>
               <LoadingTrace activeStep={displayedActiveStep} stepTexts={stepTexts} />
             </article>
           ) : null}
@@ -538,7 +567,7 @@ export default function ChatUI() {
             onClick={isLoading ? cancelMessage : undefined}
             data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다!"}
             aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
-            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end', marginLeft: '2px' }}
+            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end', marginLeft: '8px' }}
           >
             {isLoading ? (
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -690,9 +719,15 @@ function MessageText({ message, onAskSuggestion }) {
     }
   }
 
-  function toggleFeedback(value) {
-    setFeedback(feedback === value ? null : value);
-    setFeedbackBurst({ value, id: Date.now() });
+  const [shared, setShared] = useState(false);
+  function shareLink() {
+    try {
+      navigator.clipboard.writeText(window.location.href);
+      setShared(true);
+      window.setTimeout(() => setShared(false), 1400);
+    } catch {
+      setShared(false);
+    }
   }
 
   return (
@@ -713,53 +748,35 @@ function MessageText({ message, onAskSuggestion }) {
       )}
       <FailureConsentPanel request={message.meta?.failureConsent} />
       {!isInitialAssistantMessage ? (
-        <div className="message-actions" aria-label="답변 작업">
+        <div className="message-actions" aria-label="답변 작업" style={{ display: 'flex', gap: '10px', padding: '4px 0 0' }}>
           <button
             type="button"
-            onClick={() => setIsFolded(!isFolded)}
-            aria-label={isFolded ? "답변 펼치기" : "답변 접기"}
-            title={isFolded ? "답변 펼치기" : "답변 접기"}
+            onClick={copyMessage}
+            aria-label="답변 복사"
+            title="답변 복사"
+            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
           >
-            {isFolded ? "펼치기" : "접기"}
-          </button>
-          <button type="button" onClick={copyMessage} aria-label="답변 복사" title="답변 복사">
-            {copied ? "복사 완료" : "복사"}
-          </button>
-          <button
-            type="button"
-            className={`feedback-button${feedback === "up" ? " active" : ""}`}
-            onClick={() => toggleFeedback("up")}
-            aria-label="좋아요"
-            title="좋아요"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', display: 'inline-block' }}>
-              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
-            {feedbackBurst?.value === "up" ? (
-              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                </svg>
-              </span>
-            ) : null}
+            <span>{copied ? "복사 완료" : "복사"}</span>
           </button>
           <button
             type="button"
-            className={`feedback-button${feedback === "down" ? " active" : ""}`}
-            onClick={() => toggleFeedback("down")}
-            aria-label="비추천"
-            title="비추천"
+            onClick={shareLink}
+            aria-label="링크 공유"
+            title="링크 공유"
+            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', display: 'inline-block', transform: 'rotate(180deg)' }}>
-              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </svg>
-            {feedbackBurst?.value === "down" ? (
-              <span key={feedbackBurst.id} className="feedback-burst" aria-hidden="true">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'rotate(180deg)' }}>
-                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                </svg>
-              </span>
-            ) : null}
+            <span>{shared ? "링크 복사 완료" : "링크공유"}</span>
           </button>
         </div>
       ) : null}
@@ -877,9 +894,12 @@ function SourcePanel({ references }) {
 function LoadingTrace({ activeStep, stepTexts }) {
   const currentStepText = stepTexts?.[activeStep] || stepTexts?.[stepTexts.length - 1] || "질문의 의도와 맥락을 해석하고 있습니다.";
   return (
-    <div className="loading-trace" aria-label="실시간 처리 과정">
+    <div className="loading-trace" aria-label="실시간 처리 과정" style={{ marginTop: 0, marginBottom: 0 }}>
       <div className="active">
-        <p className="loading-step-text">{currentStepText}</p>
+        <p className="loading-step-text" style={{ marginTop: '2px', marginBottom: '2px', display: 'flex', alignItems: 'center' }}>
+          <span aria-hidden="true" className="hourglass" style={{ marginRight: '6px' }}>⏳</span>
+          {currentStepText}
+        </p>
       </div>
     </div>
   );
@@ -1379,7 +1399,7 @@ function ChartPanel({ chart, compact = false }) {
 
 function LineChart({ chart }) {
   const option = useMemo(() => {
-    const colors = ["#d04a02", "#e59a2f", "#7d3f16", "#b85c4b"];
+    const colors = ["#F2550A", "#e59a2f", "#7d3f16", "#b85c4b"];
     const labels = [...new Map(
       chart.datasets.flatMap((dataset) => dataset.points.map((point) => [String(point.x), point.label || String(point.x)]))
     ).values()];
@@ -1512,7 +1532,7 @@ function BarChart({ chart }) {
       data: chart.bars.map((bar) => ({
         value: Number(bar.value),
         display: bar.display,
-        itemStyle: { color: Number(bar.value) < 0 ? "#b85c4b" : "#d04a02", borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
+        itemStyle: { color: Number(bar.value) < 0 ? "#b85c4b" : "#F2550A", borderRadius: Number(bar.value) < 0 ? [6, 0, 0, 6] : [0, 6, 6, 0] },
         label: { show: true, position: Number(bar.value) < 0 ? "left" : "right", color: "#27323a", fontSize: 10, fontWeight: 700, formatter: bar.display },
       })),
     }],

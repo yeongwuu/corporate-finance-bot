@@ -44,6 +44,13 @@ class CompanyMatch:
     latest_year: int
 
 
+def _clean_industry_name(name: str | None) -> str | None:
+    if not name:
+        return name
+    import re
+    return re.sub(r"^기타\s*", "", name).strip()
+
+
 class FinancialStatementStore:
     def __init__(
         self,
@@ -122,7 +129,7 @@ class FinancialStatementStore:
                 stock_code=row["stock_code"],
                 company_name=row["company_name"],
                 market=row["market"],
-                industry_name=row["industry_name"],
+                industry_name=_clean_industry_name(row["industry_name"]),
                 latest_year=int(row["latest_year"]),
             )
             for row in rows
@@ -303,7 +310,7 @@ class FinancialStatementStore:
             stock_code=row["stock_code"],
             company_name=row["company_name"],
             market=row["market"],
-            industry_name=row["industry_name"],
+            industry_name=_clean_industry_name(row["industry_name"]),
             latest_year=int(row["latest_year"]),
         )
 
@@ -435,7 +442,7 @@ def _normalize_sheet(frame: pd.DataFrame, fiscal_year: int, statement_type: str)
     normalized["company_name"] = normalized["회사명"].astype(str).str.strip()
     normalized["market"] = _optional_column(normalized, "시장구분").astype(str).str.strip()
     normalized["industry_code"] = _optional_column(normalized, "업종").astype(str).str.strip()
-    normalized["industry_name"] = _optional_column(normalized, "업종명").astype(str).str.strip()
+    normalized["industry_name"] = _optional_column(normalized, "업종명").astype(str).str.strip().str.replace(r"^기타\s*", "", regex=True)
     normalized["report_date"] = _optional_column(normalized, "결산기준일").astype(str).str.strip()
     normalized["report_type"] = _optional_column(normalized, "보고서종류").astype(str).str.strip()
     normalized["currency"] = _optional_column(normalized, "통화").astype(str).str.strip()

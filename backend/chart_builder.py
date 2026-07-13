@@ -20,6 +20,8 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
+    if calculation.get("mode") == "stock_price_comparison":
+        return _build_stock_price_comparison_chart(calculation)
     if calculation.get("mode") == "portfolio_optimization":
         return _build_portfolio_optimization_chart(calculation)
     if calculation.get("mode") == "rf_stock_forecast":
@@ -387,4 +389,42 @@ def _build_portfolio_optimization_chart(calculation: dict[str, Any]) -> dict[str
                 "points": points
             }
         ]
+    }
+
+
+def _build_stock_price_comparison_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    comparison = calculation.get("comparison") or []
+    if not comparison:
+        return None
+        
+    datasets = []
+    for item in comparison:
+        comp_name = item["company"]["company_name"]
+        prices = item["prices"] or []
+        points = [
+            {
+                "x": int(index),
+                "y": float(point["close"]),
+                "label": point["date"],
+                "display": point["display"],
+            }
+            for index, point in enumerate(prices)
+        ]
+        if points:
+            datasets.append({
+                "key": item["company"]["stock_code"],
+                "label": comp_name,
+                "points": points
+            })
+            
+    if not datasets:
+        return None
+        
+    period = calculation.get("period") or {}
+    return {
+        "type": "line",
+        "title": "주가 비교 추이",
+        "subtitle": f"{period.get('label', '')}, 종가 기준",
+        "unit": "KRW_PRICE",
+        "datasets": datasets
     }

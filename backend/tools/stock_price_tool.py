@@ -14,6 +14,25 @@ from company_data.financial_store import FinancialStatementStore
 
 def analyze_stock_price(question: str) -> dict[str, Any]:
     store = FinancialStatementStore()
+    
+    # Check for multiple companies to compare
+    companies = []
+    seen = set()
+    for chunk in re.split(r"\s*(?:와|과|랑|하고|및|vs\.?|VS|비교|,)\s*", question):
+        cleaned = re.sub(r"(?:의|최근|주가|흐름|분석|비교|해줘|알려줘|차트|보여줘|\d+년|\d+개년)", "", chunk).strip()
+        if not cleaned or len(cleaned) < 2:
+            continue
+        try:
+            company = store.resolve_company(cleaned)
+            if company and company.stock_code not in seen:
+                seen.add(company.stock_code)
+                companies.append(company)
+        except Exception:
+            pass
+            
+    if len(companies) >= 2:
+        return compare_stock_prices(question, companies)
+
     try:
         company = store.resolve_company(question)
     except FileNotFoundError as exc:
@@ -522,3 +541,79 @@ def _next_business_dates(start: date, count: int) -> list[date]:
         if candidate.weekday() < 5:
             dates.append(candidate)
     return dates
+
+
+def compare_stock_prices(question: str, companies: list[Any]) -> dict[str, Any]:
+    period = _extract_period(question)
+    results = []
+    failures = []
+    
+    for company in companies[:3]:
+        ticker = _to_yahoo_ticker(company.stock_code, company.market)
+        price_source = "네이버 금융"
+        try:
+            frame = _download_naver_price_data(company.stock_code, period["start"], period["end"])
+            if frame.empty:
+                fallback = _download_fallback_naver_price_data(company.stock_code, period)
+                if fallback:
+                    frame, _ = fallback
+            if frame.empty:
+                frame = _download_price_data(ticker, period["start"], period["end"])
+                if not frame.empty:
+                    price_source = "Yahoo Finance"
+            if frame.empty:
+                fallback = _download_fallback_price_data(ticker, period)
+                if fallback:
+                    frame, _ = fallback
+                    price_source = "Yahoo Finance"
+        except Exception as e:
+            failures.append(f"{company.company_name}: 주가 조회 오류 ({e})")
+            continue
+            
+        if frame.empty:
+            failures.append(f"{company.company_name}: 데이터 없음")
+            continue
+            
+        stats = _build_backtest_stats(frame)
+        prices = _build_price_points(frame)
+        results.append({
+            "company": company.__dict__,
+            "ticker": ticker,
+            "price_source": price_source,
+            "stats": stats,
+            "prices": prices
+        })
+        
+    if not results:
+        return {
+            "status": "no_data",
+            "summary": "비교 대상 기업들의 주가 데이터를 조회하지 못했습니다.",
+            "steps": failures
+        }
+        
+    steps = [
+        f"조회 기간: {period['start']}~{period['end']}",
+    ]
+    summary_parts = []
+    for item in results:
+        comp_name = item["company"]["company_name"]
+        stats = item["stats"]
+        summary_parts.append(
+            f"{comp_name}은 시작 종가 {_format_krw(stats['first_close'])}, 최근 종가 {_format_krw(stats['last_close'])}로 기간 수익률 {stats['cumulative_return_display']}를 기록했습니다."
+        )
+        steps.append(
+            f"{comp_name}: 수익률 {stats['cumulative_return_display']}, 최고/최저 {_format_krw(stats['high_close'])} / {_format_krw(stats['low_close'])}, MDD {stats['max_drawdown_display']}"
+        )
+        
+    return {
+        "status": "ok",
+        "mode": "stock_price_comparison",
+        "summary": " ".join(summary_parts),
+        "steps": steps,
+        "comparison": results,
+        "period": {
+            "start": period["start"].isoformat(),
+            "end": period["end"].isoformat(),
+            "label": period["label"]
+        }
+    }

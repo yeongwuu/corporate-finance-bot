@@ -107,8 +107,12 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
             "steps": [str(exc)],
         }
     if not company:
-        # Check if it is an industry trend query
         industry = _extract_peer_industry(question, None)
+        if industry and industry != "산업" and any(word in question for word in ["성장률", "추이", "비교", "분석"]) and any(word in question for word in ["매출", "영업이익", "순이익"]):
+            peers = _query_peer_companies(store, industry, None, limit=5)
+            if peers:
+                return _analyze_industry_peers_growth_direct(question, store, industry, peers)
+        
         if industry and industry != "산업":
             news_fetch_result = None
             documents = []
@@ -999,11 +1003,11 @@ def _extract_peer_industry(question: str, base_company: Any) -> str:
         return "반도체"
     match = re.search(r"([가-힣A-Za-z0-9]+)\s*(?:기업들|업종|산업|섹터)", question)
     if match:
-        return match.group(1)
+        ret = match.group(1)
+        return re.sub(r"^기타\s*", "", ret).strip()
     if base_company:
         return _major_industry(getattr(base_company, "industry_name", "") or getattr(base_company, "company_name", ""))
 
-    # Fallback to cleaning the question and grabbing the core noun
     cleaned = question
     cleaned = re.sub(r"(?:의|을|를|이|가|은|는|에|에\s*대한|에\s*대해)\s+", " ", cleaned)
     cleaned = re.sub(r"(?:대표기업|대표회사|대표종목|대표|상위|관련|기업들|기업|회사|종목|알려줘|알려|알려주세요|알려줘요|알려주라|추천|추천해줘|분석|분석해줘|알아봐)\b.*", "", cleaned)
@@ -1011,7 +1015,7 @@ def _extract_peer_industry(question: str, base_company: Any) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     if len(cleaned) >= 2:
-        return cleaned
+        return re.sub(r"^기타\s*", "", cleaned).strip()
 
     return "산업"
 
@@ -1068,13 +1072,34 @@ def _query_peer_companies(
 
 
 def _peer_industry_keywords(industry: str) -> list[str]:
-    if industry == "반도체":
+    import re
+    norm = industry.replace(" ", "")
+    norm = re.sub(r"(?:산업|업종|업|분야|섹터)$", "", norm).strip()
+    
+    if norm in ["반도체", "메모리"]:
         return ["반도체", "전자집적회로", "다이오드", "트랜지스터", "메모리", "웨이퍼", "집적회로"]
-    if industry == "바이오":
-        return ["바이오", "의약", "제약", "생물학"]
-    if industry == "방산":
-        return ["방산", "방위", "항공", "무기", "탄약"]
-    return [industry]
+    if norm in ["바이오", "제약", "의약", "헬스케어"]:
+        return ["바이오", "의약", "제약", "생물학", "의약품", "의료"]
+    if norm in ["방산", "방위", "방위산업"]:
+        return ["방산", "방위", "항공기", "우주선", "무기", "탄약", "전투용", "함정"]
+    if norm in ["조선", "해양", "선박"]:
+        return ["조선", "선박", "건조", "함정", "보트", "해양"]
+    if norm in ["화학", "화학제품", "석유화학"]:
+        return ["화학", "석유", "고무", "플라스틱", "도료", "잉크", "화장품"]
+    if norm in ["철강", "금속", "제강"]:
+        return ["철강", "금속", "제철", "제강", "합금", "비철"]
+    if norm in ["자동차", "완성차", "부품"]:
+        return ["자동차", "트레일러", "섀시", "부품", "엔진"]
+    if norm in ["항공", "여객", "운송"]:
+        return ["항공", "여객", "운송", "화물", "공항"]
+    if norm in ["게임", "소프트웨어", "콘텐츠"]:
+        return ["게임", "소프트웨어", "개발", "퍼블리싱", "모바일게임", "온라인게임"]
+    if norm in ["배터리", "이차전지", "2차전지"]:
+        return ["이차전지", "2차전지", "축전지", "배터리", "양극재", "음극재", "전해액"]
+    if norm in ["IT", "정보기술", "인터넷", "플랫폼"]:
+        return ["소프트웨어", "인터넷", "포털", "플랫폼", "IT", "시스템 통합", "SI"]
+
+    return [norm]
 
 
 def _try_build_dart_revenue_series(company: Any, start_year: int, end_year: int) -> list[dict[str, Any]]:
@@ -1569,3 +1594,77 @@ def _fill_missing_series_with_yfinance(company: Any, account_keys: list[str], se
         pass
 
     return series
+
+
+def _analyze_industry_peers_growth_direct(
+    question: str, store: FinancialStatementStore, industry: str, peer_companies: list[Any]
+) -> dict[str, Any]:
+    summaries = []
+    for company in peer_companies:
+        available_years = store.available_years(company.stock_code)
+        if not available_years:
+            continue
+        period = _extract_period(question, available_years)
+        series = store.get_account_series(company.stock_code, ["revenue", "operating_income"], period.start_year, period.end_year)
+        metrics = _build_metric_summary(series, ["revenue", "operating_income"])
+        revenue_metric = _find_metric(metrics, "revenue")
+        if not revenue_metric or revenue_metric.get("growth") is None:
+            continue
+        summaries.append(
+            {
+                "company": company.__dict__,
+                "period": period.__dict__,
+                "series": series,
+                "metrics": metrics,
+                "growth": revenue_metric.get("growth"),
+                "cagr": revenue_metric.get("cagr"),
+                "start_amount": revenue_metric.get("start_amount"),
+                "end_amount": revenue_metric.get("end_amount"),
+                "is_base": False,
+            }
+        )
+
+    summaries.sort(
+        key=lambda item: (
+            item.get("cagr") if item.get("cagr") is not None else float("-inf"),
+            item.get("growth") if item.get("growth") is not None else float("-inf"),
+        ),
+        reverse=True,
+    )
+    for index, item in enumerate(summaries, start=1):
+        item["rank"] = index
+
+    if not summaries:
+        return {
+            "status": "no_data",
+            "summary": f"{industry} 업종에 속한 기업들의 매출 성장률 비교 데이터를 찾지 못했습니다.",
+            "steps": ["각 기업의 시작연도와 종료연도 매출액 데이터가 필요합니다."],
+            "industry": industry,
+        }
+
+    steps = [
+        f"비교 업종: {industry}",
+    ]
+    for item in summaries:
+        comp_name = item["company"]["company_name"]
+        period_lbl = f"{item['period']['start_year']}~{item['period']['end_year']}년"
+        steps.append(
+            f"{item['rank']}위. {comp_name} ({period_lbl}): "
+            f"누적 매출성장률 {item['growth'] * 100:.2f}%, CAGR {item['cagr'] * 100:.2f}%"
+        )
+        for row in item["series"]:
+            y = row["year"]
+            rev = row.get("revenue", {}).get("amount")
+            op = row.get("operating_income", {}).get("amount")
+            rev_str = _format_amount(rev) if rev is not None else "데이터 없음"
+            op_str = _format_amount(op) if op is not None else "데이터 없음"
+            steps.append(f"  - {y}년: 매출액 {rev_str}, 영업이익 {op_str}")
+
+    return {
+        "status": "ok",
+        "summary": f"{industry} 업종에 속한 주요 기업들의 매출성장률을 분석해 비교했습니다.",
+        "steps": steps,
+        "comparison": summaries,
+        "industry": industry,
+        "external_references": [],
+    }

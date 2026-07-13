@@ -431,6 +431,19 @@ def build_company_comparison_answer(calculation: dict) -> str:
         lines.append(f"{index}. {name}({company.get('stock_code', '-')})")
         if period:
             lines.append(f"기간: {period.get('start_year')}~{period.get('end_year')}년")
+        if item.get("series"):
+            for row in item["series"]:
+                year = row.get("year")
+                row_values = []
+                for k, v in row.items():
+                    if k != "year" and isinstance(v, dict):
+                        label = v.get("label") or k
+                        amount = v.get("amount")
+                        if amount is not None:
+                            row_values.append(f"{label} {_format_display_amount(amount)}")
+                if row_values:
+                    lines.append(f"- **{year}년**: {', '.join(row_values)}")
+        
         if item.get("ratio_series"):
             latest = item["ratio_series"][-1]
             values = []
@@ -730,6 +743,11 @@ def _amount_copula(amount: str) -> str:
 
 def build_rule_based_answer(tool_name: str, calculation: dict, references: list[dict]) -> str:
     summary = calculation.get("summary") or calculation.get("message") or "질문을 해석했지만 충분한 계산 결과를 찾지 못했습니다."
+    
+    if calculation.get("mode") == "proxy_beta_calculation":
+        steps = calculation.get("steps", [])
+        return summary + "\n\n" + "\n".join(steps)
+
     paragraphs = [summary]
     needs_structure = _needs_structured_answer(calculation)
 
