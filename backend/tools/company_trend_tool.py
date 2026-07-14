@@ -875,8 +875,12 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
             continue
         period = _extract_period(question, available_years)
         ratio_keys = _extract_ratio_accounts(question)
-        account_keys = _extract_accounts(question, ratio_keys) if ratio_keys else ["revenue", "operating_income", "net_income"]
+        account_keys = _extract_accounts(question, ratio_keys)
+        if not account_keys:
+            account_keys = ["revenue", "operating_income", "net_income"]
         series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
+        series = _fill_missing_series_with_yfinance(company, account_keys, series, period)
+        series = _fill_missing_series_with_dart(company, account_keys, series, period)
         ratio_series = _build_ratio_series(series, ratio_keys)
         dart_fetch = None
         if ratio_keys and not ratio_series:
@@ -1600,6 +1604,45 @@ def _fill_missing_series_with_yfinance(company: Any, account_keys: list[str], se
         pass
 
     return series
+
+
+def _fill_missing_series_with_dart(company: Any, account_keys: list[str], series: list[dict], period: Any) -> list[dict]:
+    if not load_dart_api_key():
+        return series
+    rows_by_year = {int(row["year"]): row for row in series}
+    missing_years = [
+        year
+        for year in range(int(period.start_year), int(period.end_year) + 1)
+        if any(
+            not isinstance(rows_by_year.get(year, {}).get(key), dict)
+            or rows_by_year[year][key].get("amount") is None
+            for key in account_keys
+        )
+    ]
+    if not missing_years:
+        return series
+
+    try:
+        client = DartClient()
+        for fiscal_year in missing_years:
+            result = client.fetch_financial_accounts(
+                stock_code=company.stock_code,
+                corp_name=company.company_name,
+                fiscal_year=fiscal_year,
+            )
+            if result.get("status") != "ok":
+                continue
+            accounts = _map_dart_accounts(result.get("accounts") or [])
+            row = rows_by_year.setdefault(fiscal_year, {"year": fiscal_year})
+            for key in account_keys:
+                if isinstance(row.get(key), dict) and row[key].get("amount") is not None:
+                    continue
+                account = accounts.get(key)
+                if account and account.get("amount") is not None:
+                    row[key] = {**account, "source": "dart"}
+    except Exception:
+        return series
+    return [rows_by_year[year] for year in sorted(rows_by_year)]
 
 
 def _analyze_industry_peers_growth_direct(

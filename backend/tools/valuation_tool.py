@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from company_data.financial_store import FinancialStatementStore
+from korean_particles import with_particle
 from tools.stock_price_tool import _download_naver_price_data, _download_price_data, _to_yahoo_ticker
 
 
@@ -159,7 +160,7 @@ def calculate_company_roi_per_comparison(question: str) -> dict[str, Any]:
     return {
         "status": "ok",
         "mode": "roi_per_comparison",
-        "summary": f"{results[0]['company']['company_name']}와 {results[1]['company']['company_name']}의 ROI와 PER을 비교했습니다.",
+        "summary": f"{with_particle(results[0]['company']['company_name'], '과', '와')} {results[1]['company']['company_name']}의 ROI와 PER을 비교했습니다.",
         "steps": steps,
         "comparison": results,
         "preferred_company": preferred["company"] if preferred else None,

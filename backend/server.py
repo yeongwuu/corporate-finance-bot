@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from korean_particles import normalize_company_pair_particles
 from main_agent import answer_finance_question
 
 
@@ -144,6 +145,9 @@ _question_cache_lock = Lock()
 _file_write_lock = Lock()
 _last_recommended_questions: set[str] = set()
 QUESTIONS_FILE = os.path.join(os.path.dirname(__file__), "data", "successful_questions.json")
+VERIFIED_SUCCESSFUL_QUESTIONS_FILE = os.path.join(
+    os.path.dirname(__file__), "data", "verified_successful_questions.json"
+)
 
 def _init_questions_file():
     os.makedirs(os.path.dirname(QUESTIONS_FILE), exist_ok=True)
@@ -158,7 +162,9 @@ def _init_questions_file():
             questions = list(DEFAULT_SEEDS)
 
         questions = [
-            q.replace("의 최근 당기순이익을 알려줘", "의 최근 3개년 당기순이익 추이를 분석해줘").strip()
+            normalize_company_pair_particles(
+                q.replace("의 최근 당기순이익을 알려줘", "의 최근 3개년 당기순이익 추이를 분석해줘").strip()
+            )
             for q in questions
             if isinstance(q, str) and q.strip()
         ]
@@ -250,7 +256,7 @@ def _generate_question_pool(limit: int) -> list[str]:
 
 def log_successful_question(question: str):
     _init_questions_file()
-    cleaned = question.strip()
+    cleaned = normalize_company_pair_particles(question.strip())
     if not cleaned or len(cleaned) < 5 or len(cleaned) > 100:
         return
     with _file_write_lock:
@@ -271,8 +277,24 @@ def log_successful_question(question: str):
                 questions.pop(random.choice(removable) if removable else 0)
             with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
                 json.dump(questions, f, ensure_ascii=False, indent=2)
+            _append_verified_successful_question(cleaned)
         except Exception as e:
             logger.error(f"Failed to log successful question: {e}")
+
+
+def _append_verified_successful_question(question: str) -> None:
+    try:
+        if os.path.exists(VERIFIED_SUCCESSFUL_QUESTIONS_FILE):
+            with open(VERIFIED_SUCCESSFUL_QUESTIONS_FILE, "r", encoding="utf-8") as f:
+                questions = json.load(f)
+        else:
+            questions = []
+        questions = [q for q in questions if isinstance(q, str) and q.strip()]
+        questions = list(dict.fromkeys([*questions, question]))[-300:]
+        with open(VERIFIED_SUCCESSFUL_QUESTIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(questions, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.error("Failed to log verified successful question: %s", exc)
 
 
 def _is_verified_successful_result(question: str, result: dict) -> bool:
@@ -455,14 +477,17 @@ def _mentions_top_five_company(question: str) -> bool:
 
 
 def find_similar_successful_questions(user_question: str) -> list[str]:
-    """Find the top 3 most semantically similar successful questions from database."""
-    _init_questions_file()
+    """Find similar questions that previously completed with a verified successful result."""
     with _file_write_lock:
         try:
-            with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+            with open(VERIFIED_SUCCESSFUL_QUESTIONS_FILE, "r", encoding="utf-8") as f:
                 questions = json.load(f)
         except Exception:
-            questions = list(DEFAULT_SEEDS)
+            questions = []
+
+    questions = [q for q in questions if isinstance(q, str) and q.strip()]
+    if not questions:
+        return []
 
     def get_tokens(text: str) -> set[str]:
         tokens = re.findall(r'[가-힣a-zA-Z0-9]{2,}', text.lower())
@@ -471,7 +496,7 @@ def find_similar_successful_questions(user_question: str) -> list[str]:
 
     user_tokens = get_tokens(user_question)
     if not user_tokens:
-        return random.sample(questions, 3) if len(questions) >= 3 else list(DEFAULT_SEEDS[:3])
+        return random.sample(questions, min(3, len(questions)))
 
     scored_questions = []
     for q in questions:
@@ -486,10 +511,6 @@ def find_similar_successful_questions(user_question: str) -> list[str]:
 
     scored_questions.sort(key=lambda x: (x[1], x[2]), reverse=True)
     results = [q for q, s, j in scored_questions[:3]]
-
-    if len(results) < 3:
-        fillers = [q for q in DEFAULT_SEEDS if q not in results]
-        results.extend(random.sample(fillers, 3 - len(results)))
 
     return results[:3]
 

@@ -22,14 +22,15 @@ class ForecastChartTest(unittest.TestCase):
             },
         }
 
-    def test_forecast_scenarios_are_split_into_quarterly_cumulative_paths(self):
+    def test_forecast_scenarios_branch_from_last_actual_year(self):
         chart = build_chart_spec("forecast_tool", self.calculation)
         self.assertEqual([dataset["key"] for dataset in chart["datasets"]], [
             "actual", "low_forecast", "base_forecast", "high_forecast"
         ])
         for dataset in chart["datasets"][1:]:
-            self.assertEqual(len(dataset["points"]), 4)
-            self.assertEqual(dataset["points"][-1]["label"], "2026년 4분기")
+            self.assertEqual(len(dataset["points"]), 2)
+            self.assertEqual(dataset["points"][0]["label"], "2025년")
+            self.assertEqual(dataset["points"][-1]["label"], "2026년")
         self.assertEqual(chart["datasets"][1]["points"][-1]["y"], self.calculation["forecast"]["low"])
         self.assertEqual(chart["datasets"][2]["points"][-1]["y"], self.calculation["forecast"]["base"])
         self.assertEqual(chart["datasets"][3]["points"][-1]["y"], self.calculation["forecast"]["high"])

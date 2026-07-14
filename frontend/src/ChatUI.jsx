@@ -177,9 +177,14 @@ export default function ChatUI() {
     return () => window.clearTimeout(timerId);
   }, [feedbackNotice]);
 
-  async function sendMessage(nextInput = input) {
+  async function sendMessage(nextInput = input, replaceActive = false) {
     const question = nextInput.trim();
-    if ((!question && !attachedFile) || isLoading) return;
+    if (!question && !attachedFile) return;
+    if (isLoading && !replaceActive) return;
+    if (isLoading && replaceActive && abortControllerRef.current) {
+      abortControllerRef.current.replacedByRecommendation = true;
+      abortControllerRef.current.abort();
+    }
     const history = buildConversationHistory(messages);
     const displayQuestion = question || "첨부파일의 문제를 풀어줘";
     let attachment = null;
@@ -292,9 +297,6 @@ export default function ChatUI() {
       const serverSuggestions = Array.isArray(data.suggestions)
         ? data.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2)
         : [];
-      const recommendationFallback = recommendedQuestions
-        .filter((suggestion) => suggestion && suggestion !== displayQuestion)
-        .slice(0, 2);
       setMessages([
         ...nextMessages,
         {
@@ -312,7 +314,7 @@ export default function ChatUI() {
             suggestions: needsCompany
               ? buildExampleCompanies(data.calculation?.suggested_companies)
               : shouldShowAlternativeQuestions(answer, data)
-                ? (serverSuggestions.length ? serverSuggestions : recommendationFallback)
+                ? serverSuggestions
                 : [],
             suggestionTitle: needsCompany ? "예시 기업들" : undefined,
             failureConsent: shouldAskFeedbackConsent(data, answer)
@@ -327,6 +329,7 @@ export default function ChatUI() {
         },
       ]);
     } catch (error) {
+      if (error.name === "AbortError" && abortController.replacedByRecommendation) return;
       const answer =
         error.name === "AbortError"
           ? "요청을 취소했습니다."
@@ -335,7 +338,7 @@ export default function ChatUI() {
             : error.message;
       const errorSuggestions = Array.isArray(error.suggestions)
         ? error.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2)
-        : recommendedQuestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2);
+        : [];
       setMessages([
         ...nextMessages,
         {
@@ -355,10 +358,12 @@ export default function ChatUI() {
         },
       ]);
     } finally {
-      abortControllerRef.current = null;
-      setIsLoading(false);
-      setLoadingStartedAt(null);
-      window.requestAnimationFrame(() => inputRef.current?.focus());
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+        setIsLoading(false);
+        setLoadingStartedAt(null);
+        window.requestAnimationFrame(() => inputRef.current?.focus());
+      }
     }
   }
 
@@ -367,8 +372,7 @@ export default function ChatUI() {
   }
 
   function handleRecommendedQuestionClick(questionText) {
-    if (isLoading) return;
-    sendMessage(questionText);
+    sendMessage(questionText, true);
   }
 
   return (
@@ -397,7 +401,6 @@ export default function ChatUI() {
                       type="button"
                       className="recommend-pill-btn"
                       onClick={() => handleRecommendedQuestionClick(q)}
-                      disabled={isLoading}
                     >
                       {q}
                     </button>
@@ -410,7 +413,6 @@ export default function ChatUI() {
                       type="button"
                       className="recommend-pill-btn"
                       onClick={() => handleRecommendedQuestionClick(q)}
-                      disabled={isLoading}
                     >
                       {q}
                     </button>
@@ -505,7 +507,7 @@ export default function ChatUI() {
                   </span>
                 )}
                 <article className={`message ${message.role}`}>
-                  <MessageText message={message} onAskSuggestion={sendMessage} />
+                  <MessageText message={message} onAskSuggestion={handleRecommendedQuestionClick} />
                 </article>
               </div>
             ))}
@@ -634,7 +636,6 @@ export default function ChatUI() {
               type="button"
               className="recommended-card"
               onClick={() => handleRecommendedQuestionClick(question)}
-              disabled={isLoading}
             >
               <span className="recommended-number">{index + 1}</span>
               <span className="recommended-text">{question}</span>
@@ -1082,6 +1083,21 @@ function cleanReferenceTitle(title) {
     .trim();
 }
 
+function hasKoreanFinalConsonant(text) {
+  const value = String(text || "").trim();
+  if (["S-Oil", "S-OIL"].includes(value)) return true;
+
+  for (const character of [...value].reverse()) {
+    const code = character.charCodeAt(0);
+    if (code >= 0xac00 && code <= 0xd7a3) return (code - 0xac00) % 28 !== 0;
+  }
+  return false;
+}
+
+function withKoreanParticle(text, consonantParticle, vowelParticle) {
+  return `${text}${hasKoreanFinalConsonant(text) ? consonantParticle : vowelParticle}`;
+}
+
 function buildAlternativeQuestions(question) {
   const companyNames = extractCompanies(question);
   const metric = extractMetric(question);
@@ -1099,7 +1115,7 @@ function buildAlternativeQuestions(question) {
     const first = companyNames[0];
     const second = companyNames[1];
     return filterAlternativeQuestions(question, [
-      `${first}와 ${second}의 최근 ${contextKeyword} 비교 추이를 분석해줘`,
+      `${withKoreanParticle(first, "과", "와")} ${second}의 최근 ${contextKeyword} 비교 추이를 분석해줘`,
       `${first}의 최근 ${contextKeyword}과 매출액을 함께 비교해줘`,
     ]);
   }
@@ -1424,7 +1440,7 @@ function ChartPanel({ chart, compact = false }) {
 
 function LineChart({ chart }) {
   const option = useMemo(() => {
-    const colors = ["#F2550A", "#E59A2F", "#7D3F16", "#4F7A5A"];
+    const colors = ["#F2550A", "#E59A2F", "#A63A00", "#D95C2B"];
     const labels = [...new Map(
       chart.datasets.flatMap((dataset) => dataset.points.map((point) => [String(point.x), point.label || String(point.x)]))
     ).values()];
@@ -1485,8 +1501,9 @@ function LineChart({ chart }) {
       series: chart.datasets.map((dataset, index) => {
         const seriesColor = dataset.color || colors[index % colors.length];
         const maxPoint = dataset.points.reduce((max, point) => Number(point.y) > Number(max.y) ? point : max, dataset.points[0]);
-        const maxPointIndex = dataset.points.indexOf(maxPoint);
-        const maxLabelPosition = maxPointIndex === 0 ? "right" : maxPointIndex === dataset.points.length - 1 ? "left" : "top";
+        const highlightedPoint = dataset.forecast ? dataset.points.at(-1) : maxPoint;
+        const highlightedPointIndex = dataset.points.indexOf(highlightedPoint);
+        const highlightedLabelPosition = highlightedPointIndex === 0 ? "right" : highlightedPointIndex === dataset.points.length - 1 ? "left" : "top";
         return {
           name: dataset.label,
           type: "line",
@@ -1498,12 +1515,12 @@ function LineChart({ chart }) {
           itemStyle: { color: "#ffffff", borderColor: seriesColor, borderWidth: 2 },
           emphasis: { focus: "series", lineStyle: { width: 4 } },
           data: dataset.points.map((point) => ({ value: [point.label || String(point.x), Number(point.y)], display: point.display, name: point.label })),
-          markPoint: maxPoint ? {
+          markPoint: highlightedPoint ? {
             symbol: "circle",
             symbolSize: 11,
             itemStyle: { color: "#ffffff", borderColor: seriesColor, borderWidth: 3 },
-            label: { show: true, position: maxLabelPosition, distance: 8, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: maxPoint.display },
-            data: [{ coord: [maxPoint.label || String(maxPoint.x), Number(maxPoint.y)], value: Number(maxPoint.y), name: "최댓값" }],
+            label: { show: true, position: highlightedLabelPosition, distance: 8, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: highlightedPoint.display },
+            data: [{ coord: [highlightedPoint.label || String(highlightedPoint.x), Number(highlightedPoint.y)], value: Number(highlightedPoint.y), name: dataset.forecast ? "전망" : "최댓값" }],
           } : undefined,
         };
       }),
@@ -1621,9 +1638,7 @@ function BarChart({ chart }) {
 function CompactMetricBarChart({ chart }) {
   const option = useMemo(() => {
     const metricCount = Math.max(1, chart.metrics.length);
-    const colors = metricCount === 2
-      ? ["#FF530A", "#E59A2F"]
-      : buildBarColorPalette(metricCount);
+    const colors = buildFinancialMetricColorPalette(metricCount);
     const gap = metricCount === 1 ? 0 : 4;
     const gridWidth = (92 - gap * (metricCount - 1)) / metricCount;
     const grids = chart.metrics.map((_, index) => ({
@@ -1635,7 +1650,7 @@ function CompactMetricBarChart({ chart }) {
     const xAxes = chart.metrics.map((metric, index) => ({
       type: "category",
       gridIndex: index,
-      data: metric.values.map((item) => `${item.year}년`),
+      data: metric.values.map((item) => item.label || `${item.year}년`),
       name: metric.label,
       nameLocation: "middle",
       nameGap: 30,
@@ -1681,6 +1696,14 @@ function CompactMetricBarChart({ chart }) {
     };
   }, [chart]);
   return <EChart option={option} ariaLabel={chart.title || "소규모 재무 데이터 막대그래프"} height={290} />;
+}
+
+function buildFinancialMetricColorPalette(count) {
+  const size = Math.max(1, count);
+  if (size === 1) return ["#E59A2F"];
+  if (size === 2) return ["#E59A2F", "#FF530A"];
+  if (size === 3) return ["#E59A2F", "#FEA278", "#FF530A"];
+  return buildBarColorPalette(size);
 }
 
 function EChart({ option, ariaLabel, height = 280 }) {

@@ -803,7 +803,7 @@ def compare_stock_prices(question: str, companies: list[Any]) -> dict[str, Any]:
             f"{comp_name}은 시작 종가 {_format_krw(stats['first_close'])}, 최근 종가 {_format_krw(stats['last_close'])}로 기간 수익률 {stats['cumulative_return_display']}를 기록했습니다."
         )
         steps.append(
-            f"{comp_name}: 수익률 {stats['cumulative_return_display']}, 최고/최저 {_format_krw(stats['high_close'])} / {_format_krw(stats['low_close'])}, MDD {stats['max_drawdown_display']}"
+            f"{comp_name}: 수익률 {stats['cumulative_return_display']}, 최고/최저 {_format_krw(stats['max_close'])} / {_format_krw(stats['min_close'])}, MDD {stats['max_drawdown_display']}"
         )
         
     return {

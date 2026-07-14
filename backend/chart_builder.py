@@ -29,6 +29,9 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
     if calculation.get("mode") == "rf_stock_forecast":
         return _build_rf_stock_forecast_chart(calculation)
     if tool_name == "company_trend_tool":
+        comparison_chart = _build_company_financial_comparison_chart(calculation)
+        if comparison_chart:
+            return comparison_chart
         industry_growth_chart = _build_industry_growth_comparison_chart(calculation)
         if industry_growth_chart:
             return industry_growth_chart
@@ -42,6 +45,51 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
     if tool_name == "valuation_tool":
         return _build_market_ratio_chart(calculation)
     return None
+
+
+def _build_company_financial_comparison_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+    comparison = calculation.get("comparison") or []
+    if len(comparison) < 2 or calculation.get("mode") in {"industry_growth_comparison", "representative_sector_comparison"}:
+        return None
+
+    account_order = ["revenue", "operating_income", "net_income"]
+    metrics = []
+    for account_key in account_order:
+        values = []
+        for item in comparison:
+            company_name = (item.get("company") or {}).get("company_name", "기업")
+            for row in item.get("series") or []:
+                account = row.get(account_key)
+                if not isinstance(account, dict) or account.get("amount") is None:
+                    continue
+                year = int(row["year"])
+                values.append(
+                    {
+                        "year": year,
+                        "label": f"{str(year)[-2:]}년\n{company_name}",
+                        "value": float(account["amount"]),
+                        "display": _format_amount(float(account["amount"])),
+                        "company": company_name,
+                    }
+                )
+        if values:
+            labels = {"revenue": "매출액", "operating_income": "영업이익", "net_income": "당기순이익"}
+            metrics.append({"key": account_key, "label": labels.get(account_key, account_key), "values": values})
+
+    if not metrics:
+        return None
+    company_names = [(item.get("company") or {}).get("company_name", "기업") for item in comparison]
+    periods = [item.get("period") or {} for item in comparison]
+    start_years = [int(period["start_year"]) for period in periods if period.get("start_year")]
+    end_years = [int(period["end_year"]) for period in periods if period.get("end_year")]
+    period_label = f"{min(start_years)}~{max(end_years)}년" if start_years and end_years else "최근 실적"
+    return {
+        "type": "compact_metric_bar",
+        "title": " · ".join(company_names) + " 재무지표 비교",
+        "subtitle": period_label,
+        "unit": "KRW",
+        "metrics": metrics,
+    }
 
 
 def _build_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
@@ -301,16 +349,19 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
         }
         for row in series_rows
     ]
-    def quarterly_points(value: float) -> list[dict[str, Any]]:
+    last_actual = actual_points[-1]
+
+    def scenario_points(value: float, scenario: str) -> list[dict[str, Any]]:
         return [
+            last_actual,
             {
-                "x": f"{target_year}-Q{quarter}",
-                "y": float(value) * quarter / 4,
-                "label": f"{target_year}년 {quarter}분기",
-                "display": _format_amount(float(value) * quarter / 4),
+                "x": int(target_year),
+                "y": float(value),
+                "label": f"{target_year}년",
+                "display": _format_amount(float(value)),
                 "forecast": True,
-            }
-            for quarter in range(1, 5)
+                "scenario": scenario,
+            },
         ]
 
     company = calculation.get("company") or {}
@@ -318,9 +369,7 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "type": "line",
         "title": f"{company.get('company_name', '기업')} {account_label} 전망",
-        "subtitle": (
-            f"{actual_points[0]['x']}~{target_year}년 · 전망치는 연간 값을 분기별로 균등 배분한 누적 경로"
-        ),
+        "subtitle": f"{actual_points[0]['x']}~{target_year}년 · {actual_points[-1]['x']}년 실적에서 세 가지 연간 전망으로 분기",
         "unit": "KRW",
         "preserve_combined_scale": True,
         "datasets": [
@@ -328,23 +377,23 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
             {
                 "key": "low_forecast",
                 "label": "보수 전망",
-                "points": quarterly_points(float(forecast["low"])),
+                "points": scenario_points(float(forecast["low"]), "low"),
                 "forecast": True,
-                "color": "#7D3F16",
+                "color": "#A63A00",
             },
             {
                 "key": "base_forecast",
                 "label": "기준 전망",
-                "points": quarterly_points(float(forecast["base"])),
+                "points": scenario_points(float(forecast["base"]), "base"),
                 "forecast": True,
                 "color": "#E59A2F",
             },
             {
                 "key": "high_forecast",
                 "label": "낙관 전망",
-                "points": quarterly_points(float(forecast["high"])),
+                "points": scenario_points(float(forecast["high"]), "high"),
                 "forecast": True,
-                "color": "#4F7A5A",
+                "color": "#D95C2B",
             },
         ],
         "range": {

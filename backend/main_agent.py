@@ -3,6 +3,7 @@ import time
 from typing import Callable
 
 from chart_builder import build_chart_spec
+from korean_particles import normalize_company_pair_particles
 from llm_client import build_attachment_answer, build_final_answer
 from rag.simple_rag import search_knowledge
 from tools.capital_budgeting_tool import analyze_capital_budgeting
@@ -32,6 +33,7 @@ def answer_finance_question(
 ) -> dict:
     started_at = time.perf_counter()
     trace = []
+    question = normalize_company_pair_particles(question)
     if attachment:
         return answer_attachment_question(question, attachment, started_at)
 

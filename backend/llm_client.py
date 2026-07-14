@@ -534,7 +534,6 @@ def build_company_comparison_answer(calculation: dict) -> str:
                         f"{metric['label']}: {metric['start_year']}년 {_format_display_amount(metric['start_amount'])} -> "
                         f"{metric['end_year']}년 {_format_display_amount(metric['end_amount'])}"
                     )
-    lines.append("비교 결과는 보유 재무제표 기준이며, 투자 추천이나 목표주가 의견은 아닙니다.")
     return "\n".join(lines)
 
 
