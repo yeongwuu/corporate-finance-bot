@@ -126,6 +126,10 @@ def rank_industry_companies(question: str) -> dict[str, Any]:
     industry = _extract_industry(question)
     limit = _extract_limit(question)
     rows = _query_ranked_companies(store, industry, limit)
+    revenue_source = "database"
+    if not rows:
+        rows = _query_dart_ranked_companies(store, industry, limit)
+        revenue_source = "dart"
     if not rows:
         return {
             "status": "no_data",
@@ -146,11 +150,13 @@ def rank_industry_companies(question: str) -> dict[str, Any]:
         "steps": [
             f"분류 기준: 회사명 또는 업종명에 {', '.join(_keywords_for_industry(industry))} 키워드가 포함된 기업",
             f"정렬 기준: {latest_year}년 매출액 내림차순",
+            "매출 출처: " + ("OpenDART 사업보고서" if revenue_source == "dart" else "재무제표 데이터베이스"),
             "상위 기업: " + " / ".join(lines),
         ],
         "industry": industry,
         "ranking": rows,
         "year": latest_year,
+        "revenue_source": revenue_source,
     }
 
 
@@ -449,6 +455,102 @@ def _query_ranked_companies(
             "revenue_display": _format_amount(float(row["revenue"])),
         }
         for index, row in enumerate(rows)
+    ]
+
+
+def _query_dart_ranked_companies(
+    store: FinancialStatementStore, industry: str, limit: int
+) -> list[dict[str, Any]]:
+    """Fill industry rankings when the workbook has no PL rows for that industry."""
+    if not load_dart_api_key():
+        return []
+
+    candidates = _query_industry_candidates(store, industry, limit)
+    ranked = []
+    for candidate in candidates:
+        revenue = _dart_revenue(
+            candidate["stock_code"],
+            candidate["company_name"],
+            candidate["fiscal_year"],
+        )
+        if revenue is None:
+            continue
+        ranked.append(
+            {
+                **candidate,
+                "rank": 0,
+                "revenue": float(revenue),
+                "revenue_display": _format_amount(float(revenue)),
+                "revenue_source": "dart",
+            }
+        )
+
+    ranked.sort(key=lambda row: row["revenue"], reverse=True)
+    for index, row in enumerate(ranked[:limit], start=1):
+        row["rank"] = index
+    return ranked[:limit]
+
+
+def _query_industry_candidates(
+    store: FinancialStatementStore, industry: str, limit: int
+) -> list[dict[str, Any]]:
+    keywords = _keywords_for_industry(industry)
+    where_parts = []
+    params: list[Any] = []
+    for keyword in keywords:
+        where_parts.append("(company_name LIKE ? OR industry_name LIKE ?)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+
+    conn = sqlite3.connect(store.db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        year_rows = conn.execute(
+            f"""
+            SELECT fiscal_year, COUNT(DISTINCT stock_code) AS company_count
+            FROM financial_items
+            WHERE stock_code != ''
+              AND ({' OR '.join(where_parts)})
+            GROUP BY fiscal_year
+            ORDER BY fiscal_year DESC
+            """,
+            params,
+        ).fetchall()
+        if not year_rows:
+            return []
+        target_year = next(
+            (int(row["fiscal_year"]) for row in year_rows if int(row["company_count"]) >= limit),
+            int(year_rows[0]["fiscal_year"]),
+        )
+        rows = conn.execute(
+            f"""
+            SELECT
+                fiscal_year,
+                stock_code,
+                MIN(company_name) AS company_name,
+                MIN(market) AS market,
+                MIN(industry_name) AS industry_name
+            FROM financial_items
+            WHERE fiscal_year = ?
+              AND stock_code != ''
+              AND ({' OR '.join(where_parts)})
+            GROUP BY fiscal_year, stock_code
+            ORDER BY company_name
+            LIMIT 100
+            """,
+            [target_year, *params],
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "fiscal_year": int(row["fiscal_year"]),
+            "stock_code": row["stock_code"],
+            "company_name": row["company_name"],
+            "market": row["market"],
+            "industry_name": row["industry_name"],
+        }
+        for row in rows
     ]
 
 

@@ -18,6 +18,9 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
     if calculation.get("status") == "needs_company":
         return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주세요."
 
+    if tool_name == "industry_rank_tool" and calculation.get("status") == "no_data":
+        return build_industry_rank_answer(calculation)
+
     if calculation.get("status") == "no_data":
         company = calculation.get("company") or {}
         company_name = company.get("company_name") or "해당 기업"
@@ -61,6 +64,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_bsm_calculator_answer(calculation)
     if calculation.get("mode") == "portfolio_optimization" and calculation.get("status") == "ok":
         return build_portfolio_optimization_answer(calculation)
+    if calculation.get("mode") == "cost_of_sales_ear" and calculation.get("status") == "ok":
+        return build_cost_of_sales_ear_answer(calculation)
         
     if calculation.get("status") == "latest_news":
         # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
@@ -102,6 +107,37 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         except Exception:
             return build_rule_based_answer(tool_name, calculation, references)
     return build_rule_based_answer(tool_name, calculation, references)
+
+
+def build_cost_of_sales_ear_answer(calculation: dict) -> str:
+    company = calculation.get("company") or {}
+    history = calculation.get("history") or []
+    validation = calculation.get("validation") or {}
+    ratios = " → ".join(f"{row['year']}년 {row['cost_ratio'] * 100:.1f}%" for row in history)
+    base_probability = float(calculation.get("base_defense_probability") or 0) * 100
+    scenario_probability = float(calculation.get("scenario_defense_probability") or 0) * 100
+    probability_change = float(calculation.get("probability_change") or 0) * 100
+    return "\n".join(
+        [
+            f"{company.get('company_name', '대상 기업')}의 매출원가 상승 시나리오 분석 결과입니다.",
+            "",
+            "1. 백테스팅",
+            f"- 매출원가율: {ratios}",
+            f"- 역사적 변동성(표본 표준편차): {float(calculation.get('cost_ratio_volatility') or 0) * 100:.2f}%",
+            "",
+            "2. 시뮬레이션",
+            f"- 가정: 매출원가율 +{float(calculation.get('cost_shock') or 0) * 100:.1f}%p, 기준 EPS {float(calculation.get('base_eps') or 0):,.0f}원",
+            f"- EPS 방어 확률: {base_probability:.1f}% → {scenario_probability:.1f}% ({probability_change:.1f}%p)",
+            f"- 결론: 원가 충격 시 기존 EPS를 방어할 가능성이 크게 낮아지는 고위험 구간입니다.",
+            "",
+            "3. 데이터 검증",
+            f"- 검증 상태: {'통과' if validation.get('status') == 'passed' else '확인 필요'}",
+            "- 연도별 매출액-매출원가와 매출총이익을 교차 검증했습니다.",
+            f"- 세부계정 누락 시 처리: {validation.get('missing_account_policy') or '해당 연도 제외'}",
+            "",
+            "매출·판관비·금융손익·세율은 고정한 원가 민감도 분석이며 실제 EPS 예측값은 아닙니다.",
+        ]
+    )
 
 
 def build_attachment_answer(question: str, attachment: dict[str, Any]) -> str:

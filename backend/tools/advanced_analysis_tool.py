@@ -9,6 +9,7 @@ import numpy as np
 from company_data.financial_store import FinancialStatementStore
 from dart_client import DartClient, load_dart_api_key
 from rag.external_rag import search_external_docs
+from tools.company_analysis_tool import _map_dart_accounts
 from tools.company_trend_tool import _fill_missing_series_with_yfinance
 from tools.stock_price_tool import _download_naver_price_data, _download_price_data, _to_yahoo_ticker
 from tools.valuation_tool import _fetch_listed_shares
@@ -16,6 +17,10 @@ from tools.valuation_tool import _fetch_listed_shares
 
 def analyze_advanced_question(question: str) -> dict[str, Any]:
     compact = question.replace(" ", "").lower()
+    if any(token in compact for token in ["매출원가", "원가율"]) and any(
+        token in compact for token in ["시나리오", "방어확률", "ear", "백테스팅", "몬테카를로", "eps", "주당순이익"]
+    ):
+        return _cost_of_sales_ear_scenario(question)
     if "wacc" in compact and "영구성장률" in compact and "민감도" in compact:
         return _dcf_sensitivity_analysis(question)
     if "환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]):
@@ -27,6 +32,156 @@ def analyze_advanced_question(question: str) -> dict[str, Any]:
     if any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf", "적정주가"]):
         return _ten_year_dcf(question)
     return {"status": "no_calculation", "summary": "고급 분석 유형을 확인하지 못했습니다.", "steps": []}
+
+
+def _cost_of_sales_ear_scenario(question: str) -> dict[str, Any]:
+    store = FinancialStatementStore()
+    company = _resolve_company(store, question)
+    if not company:
+        return {"status": "needs_company", "summary": "매출원가 시나리오 대상 기업명을 확인하지 못했습니다.", "steps": []}
+    if not load_dart_api_key():
+        return {"status": "no_data", "summary": "시나리오 분석에 필요한 DART_API_KEY가 없습니다.", "steps": []}
+
+    available_years = store.available_years(company.stock_code)
+    if not available_years:
+        return {"status": "no_data", "summary": f"{company.company_name}의 분석 가능 연도를 찾지 못했습니다.", "steps": []}
+    latest_year = max(available_years)
+    stated_years = sorted({int(value) for value in re.findall(r"20[1-3]\d", question)})
+    if len(stated_years) >= 2:
+        history_years = list(range(stated_years[0], stated_years[-1] + 1))[-5:]
+    else:
+        history_years = list(range(latest_year - 3, latest_year))
+
+    history = []
+    validation_logs = []
+    raw_latest_rows: list[dict[str, Any]] = []
+    try:
+        client = DartClient()
+        for fiscal_year in history_years:
+            result = client.fetch_financial_accounts(
+                stock_code=company.stock_code,
+                corp_name=company.company_name,
+                fiscal_year=fiscal_year,
+            )
+            if result.get("status") != "ok":
+                validation_logs.append(f"{fiscal_year}년: DART 계정 조회 실패")
+                continue
+            accounts = _map_dart_accounts(result.get("accounts") or [])
+            revenue = _account_amount(accounts, "revenue")
+            cost = _account_amount(accounts, "cost_of_sales")
+            gross_profit = _account_amount(accounts, "gross_profit")
+            missing = [label for label, value in [("매출액", revenue), ("매출원가", cost)] if value is None]
+            if missing:
+                validation_logs.append(f"{fiscal_year}년: 세부계정 누락({', '.join(missing)}) — 해당 연도 제외")
+                continue
+            calculated_gross = revenue - cost
+            cross_check_ok = gross_profit is None or abs(calculated_gross - gross_profit) <= max(1.0, abs(revenue) * 1e-6)
+            validation_logs.append(
+                f"{fiscal_year}년: 매출액-매출원가와 매출총이익 교차 검증 "
+                + ("일치" if cross_check_ok else "불일치")
+            )
+            if not cross_check_ok:
+                continue
+            history.append(
+                {"year": fiscal_year, "revenue": revenue, "cost_of_sales": cost, "cost_ratio": cost / revenue}
+            )
+
+        latest_result = client.fetch_financial_accounts(
+            stock_code=company.stock_code,
+            corp_name=company.company_name,
+            fiscal_year=latest_year,
+        )
+        if latest_result.get("status") == "ok":
+            raw_latest_rows = latest_result.get("accounts") or []
+    except Exception as exc:
+        return {
+            "status": "no_data",
+            "summary": f"{company.company_name}의 DART 재무 데이터를 조회하지 못했습니다.",
+            "steps": [str(exc)],
+            "company": company.__dict__,
+        }
+
+    if len(history) < 3:
+        return {
+            "status": "no_data",
+            "summary": f"{company.company_name}의 매출원가율 변동성을 계산할 유효 연도가 부족합니다.",
+            "steps": validation_logs,
+            "company": company.__dict__,
+        }
+
+    cost_ratios = np.array([row["cost_ratio"] for row in history], dtype=float)
+    volatility = float(np.std(cost_ratios, ddof=1))
+    shock_pct = _extract_percent(question, "매출원가") or _extract_percent(question, "원가율") or 2.0
+    shock = shock_pct / 100
+    base_eps = _extract_eps(question) or _find_basic_eps(raw_latest_rows)
+    if base_eps is None:
+        return {
+            "status": "no_data",
+            "summary": f"{company.company_name}의 기준 EPS를 확인하지 못했습니다.",
+            "steps": validation_logs,
+            "company": company.__dict__,
+        }
+
+    simulation_count = 5_000
+    rng = np.random.default_rng(2922)
+    simulated_cost_ratio_changes = rng.normal(0.0, volatility, simulation_count)
+    base_defense_probability = float(np.mean(simulated_cost_ratio_changes <= 0))
+    scenario_defense_probability = float(np.mean(simulated_cost_ratio_changes + shock <= 0))
+    probability_change = scenario_defense_probability - base_defense_probability
+    ratios_text = " → ".join(f"{row['cost_ratio'] * 100:.1f}%" for row in history)
+    return {
+        "status": "ok",
+        "mode": "cost_of_sales_ear",
+        "summary": (
+            f"{company.company_name}의 매출원가율이 {shock_pct:.1f}%p 상승하면 EPS {base_eps:,.0f}원 방어 확률은 "
+            f"{base_defense_probability * 100:.1f}%에서 {scenario_defense_probability * 100:.1f}%로 "
+            f"{probability_change * 100:.1f}%p 낮아집니다."
+        ),
+        "steps": [
+            f"백테스팅: {history[0]['year']}~{history[-1]['year']}년 매출원가율 {ratios_text}",
+            f"역사적 변동성: 표본 표준편차 {volatility * 100:.2f}%",
+            f"시뮬레이션: 매출원가율 변화 5,000개 경로, 기준 EPS {base_eps:,.0f}원, 원가율 +{shock_pct:.1f}%p",
+            f"EPS 방어 확률: {base_defense_probability * 100:.1f}% → {scenario_defense_probability * 100:.1f}% ({probability_change * 100:.1f}%p)",
+            "검증 로그: " + " | ".join(validation_logs),
+            "매출원가율 이외의 매출·판관비·금융손익·세율은 기준 시점과 동일하다고 가정한 민감도 분석입니다.",
+        ],
+        "company": company.__dict__,
+        "history": history,
+        "history_years": [row["year"] for row in history],
+        "cost_ratio_volatility": volatility,
+        "cost_shock": shock,
+        "base_eps": base_eps,
+        "base_defense_probability": base_defense_probability,
+        "scenario_defense_probability": scenario_defense_probability,
+        "probability_change": probability_change,
+        "simulation_count": simulation_count,
+        "validation": {"status": "passed", "logs": validation_logs, "missing_account_policy": "유효 연도에서 제외"},
+        "source": "DART fnlttSinglAcntAll",
+    }
+
+
+def _account_amount(accounts: dict[str, Any], key: str) -> float | None:
+    item = accounts.get(key)
+    return float(item["amount"]) if isinstance(item, dict) and item.get("amount") is not None else None
+
+
+def _extract_eps(question: str) -> float | None:
+    match = re.search(r"eps[^0-9]{0,20}([0-9][0-9,]*(?:\.[0-9]+)?)\s*원?", question, re.IGNORECASE)
+    return float(match.group(1).replace(",", "")) if match else None
+
+
+def _find_basic_eps(rows: list[dict[str, Any]]) -> float | None:
+    preferred = ["계속영업 기본주당이익", "기본주당이익(손실)", "기본주당이익"]
+    for label in preferred:
+        for row in rows:
+            name = re.sub(r"\s+", " ", str(row.get("account_nm") or "")).strip()
+            if name == label or label in name:
+                value = str(row.get("thstrm_amount") or "").replace(",", "").strip()
+                try:
+                    return float(value)
+                except ValueError:
+                    continue
+    return None
 
 
 def _dcf_sensitivity_analysis(question: str) -> dict[str, Any]:

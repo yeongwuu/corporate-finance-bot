@@ -20,7 +20,7 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
-    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "multi_factor_stress"}:
+    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "multi_factor_stress", "cost_of_sales_ear"}:
         return _build_advanced_analysis_chart(calculation)
     if calculation.get("mode") == "stock_price_comparison":
         return _build_stock_price_comparison_chart(calculation)
@@ -301,24 +301,51 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
         }
         for row in series_rows
     ]
-    last = actual_points[-1]
-    forecast_point = {
-        "x": int(target_year),
-        "y": float(forecast["base"]),
-        "label": f"{target_year}년 전망",
-        "display": _format_amount(float(forecast["base"])),
-        "forecast": True,
-    }
+    def quarterly_points(value: float) -> list[dict[str, Any]]:
+        return [
+            {
+                "x": f"{target_year}-Q{quarter}",
+                "y": float(value) * quarter / 4,
+                "label": f"{target_year}년 {quarter}분기",
+                "display": _format_amount(float(value) * quarter / 4),
+                "forecast": True,
+            }
+            for quarter in range(1, 5)
+        ]
+
     company = calculation.get("company") or {}
     account_label = calculation.get("account_label") or "재무지표"
     return {
         "type": "line",
         "title": f"{company.get('company_name', '기업')} {account_label} 전망",
-        "subtitle": f"{actual_points[0]['x']}~{target_year}년, 기준 전망 {_format_amount(float(forecast['base']))}",
+        "subtitle": (
+            f"{actual_points[0]['x']}~{target_year}년 · 전망치는 연간 값을 분기별로 균등 배분한 누적 경로"
+        ),
         "unit": "KRW",
+        "preserve_combined_scale": True,
         "datasets": [
-            {"key": "actual", "label": "실적", "points": actual_points},
-            {"key": "forecast", "label": "기준 전망", "points": [last, forecast_point], "forecast": True},
+            {"key": "actual", "label": "실적", "points": actual_points, "color": "#F2550A"},
+            {
+                "key": "low_forecast",
+                "label": "보수 전망",
+                "points": quarterly_points(float(forecast["low"])),
+                "forecast": True,
+                "color": "#7D3F16",
+            },
+            {
+                "key": "base_forecast",
+                "label": "기준 전망",
+                "points": quarterly_points(float(forecast["base"])),
+                "forecast": True,
+                "color": "#E59A2F",
+            },
+            {
+                "key": "high_forecast",
+                "label": "낙관 전망",
+                "points": quarterly_points(float(forecast["high"])),
+                "forecast": True,
+                "color": "#4F7A5A",
+            },
         ],
         "range": {
             "low": _format_amount(float(forecast["low"])),
@@ -472,6 +499,20 @@ def _build_stock_price_comparison_chart(calculation: dict[str, Any]) -> dict[str
 
 def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
     mode = calculation.get("mode")
+    if mode == "cost_of_sales_ear":
+        company = calculation.get("company") or {}
+        base = float(calculation.get("base_defense_probability") or 0) * 100
+        scenario = float(calculation.get("scenario_defense_probability") or 0) * 100
+        return {
+            "type": "bar",
+            "title": f"{company.get('company_name', '기업')} EPS 방어 확률",
+            "subtitle": f"매출원가율 +{float(calculation.get('cost_shock') or 0) * 100:.1f}%p 시나리오",
+            "unit": "PERCENT",
+            "bars": [
+                {"key": "base", "label": "기준", "value": base, "display": f"{base:.1f}%", "color": "#FEA278"},
+                {"key": "scenario", "label": "원가 상승", "value": scenario, "display": f"{scenario:.1f}%", "color": "#FF530A"},
+            ],
+        }
     if mode == "advanced_dcf":
         company = calculation.get("company") or {}
         projections = calculation.get("projections") or []

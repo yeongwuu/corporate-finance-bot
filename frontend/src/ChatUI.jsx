@@ -1424,11 +1424,13 @@ function ChartPanel({ chart, compact = false }) {
 
 function LineChart({ chart }) {
   const option = useMemo(() => {
-    const colors = ["#F2550A", "#e59a2f", "#7d3f16", "#b85c4b"];
+    const colors = ["#F2550A", "#E59A2F", "#7D3F16", "#4F7A5A"];
     const labels = [...new Map(
       chart.datasets.flatMap((dataset) => dataset.points.map((point) => [String(point.x), point.label || String(point.x)]))
     ).values()];
-    const hasInitialZoom = labels.length >= 4;
+    const initialVisiblePercent = getInitialLineChartVisiblePercent(labels.length);
+    const hasInitialZoom = initialVisiblePercent < 100;
+    const zoomStart = 100 - initialVisiblePercent;
     return {
       animationDuration: 650,
       animationEasing: "cubicOut",
@@ -1477,10 +1479,11 @@ function LineChart({ chart }) {
         splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
       },
       dataZoom: hasInitialZoom ? [
-        { type: "inside", start: 50, end: 100 },
-        { type: "slider", start: 50, end: 100, height: 14, bottom: 4, borderColor: "transparent", fillerColor: "rgba(208,74,2,.12)" },
+        { type: "inside", start: zoomStart, end: 100 },
+        { type: "slider", start: zoomStart, end: 100, height: 14, bottom: 4, borderColor: "transparent", fillerColor: "rgba(208,74,2,.12)" },
       ] : [],
       series: chart.datasets.map((dataset, index) => {
+        const seriesColor = dataset.color || colors[index % colors.length];
         const maxPoint = dataset.points.reduce((max, point) => Number(point.y) > Number(max.y) ? point : max, dataset.points[0]);
         const maxPointIndex = dataset.points.indexOf(maxPoint);
         const maxLabelPosition = maxPointIndex === 0 ? "right" : maxPointIndex === dataset.points.length - 1 ? "left" : "top";
@@ -1491,14 +1494,14 @@ function LineChart({ chart }) {
           showSymbol: dataset.points.length <= 60,
           symbol: "circle",
           symbolSize: dataset.points.length > 40 ? 4 : 7,
-          lineStyle: { color: colors[index % colors.length], width: 3, type: dataset.forecast ? "dashed" : "solid" },
-          itemStyle: { color: "#ffffff", borderColor: colors[index % colors.length], borderWidth: 2 },
+          lineStyle: { color: seriesColor, width: 3, type: dataset.forecast ? "dashed" : "solid" },
+          itemStyle: { color: "#ffffff", borderColor: seriesColor, borderWidth: 2 },
           emphasis: { focus: "series", lineStyle: { width: 4 } },
           data: dataset.points.map((point) => ({ value: [point.label || String(point.x), Number(point.y)], display: point.display, name: point.label })),
           markPoint: maxPoint ? {
             symbol: "circle",
             symbolSize: 11,
-            itemStyle: { color: "#ffffff", borderColor: colors[index % colors.length], borderWidth: 3 },
+            itemStyle: { color: "#ffffff", borderColor: seriesColor, borderWidth: 3 },
             label: { show: true, position: maxLabelPosition, distance: 8, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: maxPoint.display },
             data: [{ coord: [maxPoint.label || String(maxPoint.x), Number(maxPoint.y)], value: Number(maxPoint.y), name: "최댓값" }],
           } : undefined,
@@ -1507,6 +1510,14 @@ function LineChart({ chart }) {
     };
   }, [chart]);
   return <EChart option={option} ariaLabel={chart.title || "재무 추이 선 그래프"} />;
+}
+
+function getInitialLineChartVisiblePercent(pointCount) {
+  if (pointCount < 10) return 100;
+  if (pointCount < 20) return 80;
+  if (pointCount < 40) return 70;
+  if (pointCount < 80) return 60;
+  return 50;
 }
 
 function ChartDataTable({ table }) {
@@ -1531,6 +1542,7 @@ function ChartDataTable({ table }) {
 
 function shouldSplitChartByScale(chart) {
   if (chart.type !== "line") return false;
+  if (chart.preserve_combined_scale) return false;
   if (chart.unit !== "KRW" || chart.datasets.length < 2) return false;
   const maxima = chart.datasets
     .map((dataset) => Math.max(...dataset.points.map((point) => Math.abs(Number(point.y)))))
@@ -1553,6 +1565,7 @@ function formatChartValue(value, unit) {
 function buildBarColorPalette(count) {
   const size = Math.max(1, count);
   if (size === 1) return ["#FF530A"];
+  if (size === 2) return ["#FF530A", "#E59A2F"];
   const start = [0xFD, 0xF0, 0xE6];
   const end = [0xFF, 0x53, 0x0A];
   return Array.from({ length: size }, (_, index) => {
@@ -1608,7 +1621,9 @@ function BarChart({ chart }) {
 function CompactMetricBarChart({ chart }) {
   const option = useMemo(() => {
     const metricCount = Math.max(1, chart.metrics.length);
-    const colors = buildBarColorPalette(metricCount);
+    const colors = metricCount === 2
+      ? ["#FF530A", "#E59A2F"]
+      : buildBarColorPalette(metricCount);
     const gap = metricCount === 1 ? 0 : 4;
     const gridWidth = (92 - gap * (metricCount - 1)) / metricCount;
     const grids = chart.metrics.map((_, index) => ({
@@ -1659,7 +1674,7 @@ function CompactMetricBarChart({ chart }) {
         data: metric.values.map((item) => ({
           value: item.value,
           display: item.display,
-          itemStyle: { color: colors[index % colors.length], borderRadius: [6, 6, 0, 0] },
+          itemStyle: { color: colors[index % colors.length], opacity: 1, borderRadius: [6, 6, 0, 0] },
           label: { show: true, position: "top", color: "#27323a", fontSize: 9, fontWeight: 700, formatter: item.display },
         })),
       })),

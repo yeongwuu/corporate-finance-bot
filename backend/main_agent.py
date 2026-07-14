@@ -509,7 +509,11 @@ def select_tool(question: str) -> str:
     compact = normalized.replace(" ", "")
 
     if (
-        any(token in compact for token in ["몬테카를로", "기대수익률분포", "유리할확률"])
+        (
+            any(token in compact for token in ["매출원가", "원가율"])
+            and any(token in compact for token in ["시나리오", "방어확률", "ear", "백테스팅", "몬테카를로", "eps", "주당순이익"])
+        )
+        or any(token in compact for token in ["몬테카를로", "기대수익률분포", "유리할확률"])
         or ("wacc" in compact and "영구성장률" in compact and "민감도" in compact)
         or ("환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]))
         or ("기준금리" in compact and "환율" in compact)

@@ -5,6 +5,7 @@
   --accent-dark: #a63a00;
   --accent-soft: #fff2e8;
   --accent-border: #f0b58d;
+  --user-message: #f2550a;
   --danger: #b33a2b;
   --surface: #ffffff;
   --surface-muted: #fbf8f5;
@@ -195,8 +196,8 @@ h2 {
   max-width: 66%;
   padding: 10px 20px;
   border-radius: 24px;
-  background: #F2550A;
-  border-color: #F2550A;
+  background: var(--user-message);
+  border-color: var(--user-message);
   color: #ffffff;
   box-shadow: 0 4px 16px rgba(242, 85, 10, 0.1);
 }
@@ -370,8 +371,8 @@ h2 {
 }
 
 .failure-consent-actions button.primary {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--user-message);
+  background: var(--user-message);
   color: #ffffff;
 }
 
