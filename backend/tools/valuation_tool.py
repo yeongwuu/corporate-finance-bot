@@ -203,6 +203,19 @@ def calculate_market_ratio_trend(question: str) -> dict[str, Any]:
     start_year, end_year, period_label = _extract_year_period(question, available_years)
     account_keys = _required_accounts_for_market_ratios(ratio_keys)
     financial_rows = store.get_account_series(company.stock_code, account_keys, start_year, end_year)
+    if any(
+        not isinstance(row.get(account_key), dict) or row[account_key].get("amount") is None
+        for row in financial_rows
+        for account_key in account_keys
+    ):
+        from tools.company_trend_tool import Period, _fill_missing_series_with_dart
+
+        financial_rows = _fill_missing_series_with_dart(
+            company,
+            account_keys,
+            financial_rows,
+            Period(start_year, end_year, period_label),
+        )
     shares = _fetch_listed_shares(company.stock_code, company.market)
     if not shares:
         return {
@@ -535,8 +548,7 @@ def _fetch_year_end_close(stock_code: str, market: str | None, fiscal_year: int)
     if frame is not None and not frame.empty:
         return float(frame["Close"].iloc[-1])
     
-    # Fallback to simulated price if external fetching completely fails
-    return 10000.0 + float(fiscal_year - 2020) * 1200.0
+    return None
 
 
 def _account_amount(row: dict[str, Any] | None, account_key: str) -> float | None:

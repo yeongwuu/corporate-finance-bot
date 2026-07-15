@@ -848,13 +848,13 @@ function MessageText({ message, onAskSuggestion }) {
       )}
       <FailureConsentPanel request={message.meta?.failureConsent} />
       {!isInitialAssistantMessage ? (
-        <div className="message-actions" aria-label="답변 작업" style={{ display: 'flex', gap: '10px', padding: '4px 0 0' }}>
+        <div className="message-actions" aria-label="답변 작업">
           <button
             type="button"
+            className="message-action-btn"
             onClick={copyMessage}
             aria-label="답변 복사"
-            title="답변 복사"
-            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}
+            data-tooltip={copied ? "복사했습니다" : "답변을 복사합니다"}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -863,11 +863,10 @@ function MessageText({ message, onAskSuggestion }) {
           </button>
           <button
             type="button"
-            className={shared ? "active" : undefined}
+            className={`message-action-btn${shared ? " active" : ""}`}
             onClick={shareQuestionAndAnswer}
             aria-label="질문과 답변 공유"
-            title={shared ? "공유했습니다" : "질문과 답변 공유"}
-            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}
+            data-tooltip={shared ? "공유했습니다" : "질문과 답변을 공유합니다"}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" />
@@ -1537,12 +1536,20 @@ function LineChart({ chart }) {
     const hasInitialZoom = initialVisiblePercent < 100;
     const zoomStart = 100 - initialVisiblePercent;
     const isForecastChart = chart.datasets.some((dataset) => dataset.forecast);
+    const hasDualAxis = Boolean(chart.dual_axis);
+    const baseYAxis = {
+      type: "value",
+      scale: true,
+      splitNumber: 4,
+      axisTick: { show: false },
+      axisLabel: { color: "#796b63", fontSize: 10, formatter: (value) => formatChartValue(Number(value), chart.unit) },
+    };
     return {
       animationDuration: 650,
       animationEasing: "cubicOut",
       color: colors,
       aria: { enabled: true, decal: { show: false } },
-      grid: { top: isForecastChart ? 72 : chart.datasets.length > 1 ? 54 : 30, right: 34, bottom: hasInitialZoom ? 58 : 34, left: 72, containLabel: false },
+      grid: { top: isForecastChart ? 72 : chart.datasets.length > 1 ? 54 : 30, right: hasDualAxis ? 82 : 34, bottom: hasInitialZoom ? 58 : 34, left: 72, containLabel: false },
       legend: chart.datasets.length > 1 ? {
         top: 4,
         right: 8,
@@ -1575,13 +1582,26 @@ function LineChart({ chart }) {
         axisTick: { show: false },
         axisLabel: { color: "#796b63", fontSize: 10, hideOverlap: true },
       },
-      yAxis: {
-        type: "value",
-        scale: true,
-        splitNumber: 4,
+      yAxis: hasDualAxis ? [
+        {
+          ...baseYAxis,
+          name: "매출액",
+          position: "left",
+          axisLine: { show: true, lineStyle: { color: "#FF530A" } },
+          splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
+        },
+        {
+          ...baseYAxis,
+          name: "영업이익 · 당기순이익",
+          position: "right",
+          min: (range) => Math.min(0, range.min),
+          max: (range) => Math.max(0, range.max),
+          axisLine: { show: true, lineStyle: { color: "#E59A2F" } },
+          splitLine: { show: false },
+        },
+      ] : {
+        ...baseYAxis,
         axisLine: { show: true, lineStyle: { color: "#d8cec5" } },
-        axisTick: { show: false },
-        axisLabel: { color: "#796b63", fontSize: 10, formatter: (value) => formatChartValue(Number(value), chart.unit) },
         splitLine: { lineStyle: { color: "#eee6df", type: "dashed" } },
       },
       dataZoom: hasInitialZoom ? [
@@ -1598,6 +1618,7 @@ function LineChart({ chart }) {
         return {
           name: dataset.label,
           type: "line",
+          yAxisIndex: hasDualAxis && dataset.axis === "profit" ? 1 : 0,
           smooth: dataset.points.length < 80 ? 0.28 : false,
           showSymbol: dataset.points.length <= 60,
           symbol: "circle",
@@ -1650,6 +1671,7 @@ function ChartDataTable({ table }) {
 
 function shouldSplitChartByScale(chart) {
   if (chart.type !== "line") return false;
+  if (chart.dual_axis) return false;
   if (chart.preserve_combined_scale) return false;
   if (chart.unit !== "KRW" || chart.datasets.length < 2) return false;
   const maxima = chart.datasets
@@ -1727,17 +1749,30 @@ function BarChart({ chart }) {
 }
 
 function CompactMetricBarChart({ chart }) {
+  const shouldStackMetrics = chart.metrics.length > 1 && chart.metrics.some((metric) => (
+    metric.values.length > 4
+    || metric.values.some((item) => String(item.label || "").length > 9)
+  ));
+  const chartHeight = shouldStackMetrics ? chart.metrics.length * 240 + 12 : 290;
   const option = useMemo(() => {
     const metricCount = Math.max(1, chart.metrics.length);
     const colors = buildFinancialMetricColorPalette(metricCount);
     const gap = metricCount === 1 ? 0 : 4;
     const gridWidth = (92 - gap * (metricCount - 1)) / metricCount;
-    const grids = chart.metrics.map((_, index) => ({
-      left: `${4 + index * (gridWidth + gap)}%`,
-      width: `${gridWidth}%`,
-      top: 20,
-      bottom: 58,
-    }));
+    const grids = chart.metrics.map((_, index) => shouldStackMetrics
+      ? {
+          left: 72,
+          right: 24,
+          top: 20 + index * 240,
+          height: 150,
+          containLabel: false,
+        }
+      : {
+          left: `${4 + index * (gridWidth + gap)}%`,
+          width: `${gridWidth}%`,
+          top: 20,
+          bottom: 58,
+        });
     const xAxes = chart.metrics.map((metric, index) => ({
       type: "category",
       gridIndex: index,
@@ -1748,11 +1783,20 @@ function CompactMetricBarChart({ chart }) {
       nameTextStyle: { color: "#27323a", fontSize: 12, fontWeight: 700 },
       axisLine: { lineStyle: { color: "#d8cec5" } },
       axisTick: { show: false },
-      axisLabel: { color: "#6f625b", fontSize: 10 },
+      axisLabel: {
+        color: "#6f625b",
+        fontSize: 10,
+        interval: 0,
+        lineHeight: 14,
+        width: shouldStackMetrics ? 72 : undefined,
+        overflow: shouldStackMetrics ? "break" : "truncate",
+      },
     }));
     const yAxes = chart.metrics.map((_, index) => ({
       type: "value",
       gridIndex: index,
+      min: (range) => Math.min(0, range.min),
+      max: (range) => Math.max(0, range.max),
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: { color: "#796b63", fontSize: 9, formatter: (value) => formatChartValue(Number(value), chart.unit) },
@@ -1780,13 +1824,24 @@ function CompactMetricBarChart({ chart }) {
         data: metric.values.map((item) => ({
           value: item.value,
           display: item.display,
-          itemStyle: { color: colors[index % colors.length], opacity: 1, borderRadius: [6, 6, 0, 0] },
-          label: { show: true, position: "top", color: "#27323a", fontSize: 9, fontWeight: 700, formatter: item.display },
+          itemStyle: {
+            color: colors[index % colors.length],
+            opacity: 1,
+            borderRadius: Number(item.value) < 0 ? [0, 0, 6, 6] : [6, 6, 0, 0],
+          },
+          label: {
+            show: true,
+            position: Number(item.value) < 0 ? "bottom" : "top",
+            color: "#27323a",
+            fontSize: 9,
+            fontWeight: 700,
+            formatter: item.display,
+          },
         })),
       })),
     };
-  }, [chart]);
-  return <EChart option={option} ariaLabel={chart.title || "소규모 재무 데이터 막대그래프"} height={290} />;
+  }, [chart, shouldStackMetrics]);
+  return <EChart option={option} ariaLabel={chart.title || "소규모 재무 데이터 막대그래프"} height={chartHeight} />;
 }
 
 function buildFinancialMetricColorPalette(count) {

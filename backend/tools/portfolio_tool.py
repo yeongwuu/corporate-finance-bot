@@ -912,6 +912,7 @@ def is_portfolio_optimization_question(question: str) -> bool:
 
 
 def calculate_optimal_portfolio(question: str) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
     import numpy as np
     import pandas as pd
     import re
@@ -962,7 +963,7 @@ def calculate_optimal_portfolio(question: str) -> dict:
         f"분석 기간: {start_date} ~ {end_date} (최근 {analysis_years}년)"
     ]
     
-    for comp in companies:
+    def load_company_prices(comp):
         try:
             ticker = _to_yahoo_ticker(comp.stock_code, comp.market)
             df = _download_price_data(ticker, start_date, end_date)
@@ -973,9 +974,18 @@ def calculate_optimal_portfolio(question: str) -> dict:
                     df = pd.DataFrame(df)
                 close_column = "Close" if "Close" in df.columns else "close" if "close" in df.columns else None
                 if close_column:
-                    price_series[comp.company_name] = pd.to_numeric(df[close_column], errors="coerce")
+                    return comp.company_name, pd.to_numeric(df[close_column], errors="coerce")
         except Exception:
-            pass
+            return comp.company_name, None
+        return comp.company_name, None
+
+    # Market data calls dominate this analysis. Load independent tickers concurrently
+    # instead of multiplying a slow provider response by the number of companies.
+    with ThreadPoolExecutor(max_workers=min(4, len(companies))) as executor:
+        loaded_prices = list(executor.map(load_company_prices, companies))
+    for company_name, close_series in loaded_prices:
+        if close_series is not None and not close_series.empty:
+            price_series[company_name] = close_series
             
     if len(price_series) < 2:
         return {"status": "no_data", "summary": "최적화에 필요한 실제 주가 데이터를 두 종목 이상 확보하지 못했습니다.", "steps": steps}

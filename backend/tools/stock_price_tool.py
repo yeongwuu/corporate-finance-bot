@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import ssl
+import threading
+import time as time_module
 import urllib.request
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -11,6 +14,33 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from company_data.financial_store import FinancialStatementStore
+
+
+_PRICE_CACHE_TTL_SECONDS = int(os.getenv("PRICE_CACHE_TTL_SECONDS", "900"))
+_PRICE_CACHE: dict[tuple[str, str, str, str], tuple[float, pd.DataFrame]] = {}
+_PRICE_CACHE_LOCK = threading.Lock()
+
+
+def _get_cached_price_frame(key: tuple[str, str, str, str]) -> pd.DataFrame | None:
+    with _PRICE_CACHE_LOCK:
+        cached = _PRICE_CACHE.get(key)
+        if not cached:
+            return None
+        cached_at, frame = cached
+        if time_module.monotonic() - cached_at > _PRICE_CACHE_TTL_SECONDS:
+            _PRICE_CACHE.pop(key, None)
+            return None
+        return frame.copy()
+
+
+def _cache_price_frame(key: tuple[str, str, str, str], frame: pd.DataFrame) -> None:
+    if frame is None or frame.empty:
+        return
+    with _PRICE_CACHE_LOCK:
+        _PRICE_CACHE[key] = (time_module.monotonic(), frame.copy())
+        if len(_PRICE_CACHE) > 96:
+            oldest_key = min(_PRICE_CACHE, key=lambda item: _PRICE_CACHE[item][0])
+            _PRICE_CACHE.pop(oldest_key, None)
 
 
 def analyze_stock_price(question: str) -> dict[str, Any]:
@@ -148,6 +178,11 @@ def analyze_stock_price(question: str) -> dict[str, Any]:
 def _download_price_data(ticker: str, start: date, end: date) -> pd.DataFrame:
     import yfinance as yf
 
+    cache_key = ("yahoo", ticker, start.isoformat(), end.isoformat())
+    cached = _get_cached_price_frame(cache_key)
+    if cached is not None:
+        return cached
+
     frame = yf.download(
         ticker,
         start=start.isoformat(),
@@ -155,10 +190,13 @@ def _download_price_data(ticker: str, start: date, end: date) -> pd.DataFrame:
         progress=False,
         auto_adjust=True,
         threads=False,
+        timeout=8,
     )
     if isinstance(frame.columns, pd.MultiIndex):
         frame.columns = frame.columns.get_level_values(0)
-    return frame.dropna(subset=["Close"]) if "Close" in frame else pd.DataFrame()
+    frame = frame.dropna(subset=["Close"]) if "Close" in frame else pd.DataFrame()
+    _cache_price_frame(cache_key, frame)
+    return frame.copy()
 
 
 def _download_fallback_price_data(ticker: str, period: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]] | None:
@@ -183,6 +221,10 @@ def _download_fallback_price_data(ticker: str, period: dict[str, Any]) -> tuple[
 
 def _download_naver_price_data(stock_code: str, start: date, end: date) -> pd.DataFrame:
     code = stock_code.zfill(6)
+    cache_key = ("naver", code, start.isoformat(), end.isoformat())
+    cached = _get_cached_price_frame(cache_key)
+    if cached is not None:
+        return cached
     duration = max(30, (end - start).days)
     max_pages = min(260, max(20, math.ceil(duration / 7) + 5))
     rows: list[dict[str, Any]] = []
@@ -205,7 +247,9 @@ def _download_naver_price_data(stock_code: str, start: date, end: date) -> pd.Da
         index=pd.to_datetime([row["date"] for row in filtered]),
     )
     frame = frame[~frame.index.duplicated(keep="last")]
-    return frame.sort_index()
+    frame = frame.sort_index()
+    _cache_price_frame(cache_key, frame)
+    return frame.copy()
 
 
 def _download_fallback_naver_price_data(
@@ -233,7 +277,7 @@ def _download_fallback_naver_price_data(
 def _fetch_naver_price_page(stock_code: str, page: int) -> list[dict[str, Any]]:
     url = f"https://finance.naver.com/item/sise_day.naver?code={stock_code}&page={page}"
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(request, timeout=10, context=_ssl_context()) as response:
+    with urllib.request.urlopen(request, timeout=4, context=_ssl_context()) as response:
         html = response.read().decode("euc-kr", errors="ignore")
 
     rows = []

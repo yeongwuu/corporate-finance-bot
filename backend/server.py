@@ -156,6 +156,55 @@ ADVANCED_QUESTION_SEEDS = [
     "현대차·기아·현대모비스의 최근 5년 주가를 이용해 최대 샤프지수 포트폴리오와 최소분산 포트폴리오를 구성해줘.",
     "삼성전자 DCF 가치평가에서 매출 성장률과 영업이익률 변화가 적정 주가에 미치는 영향을 분석해줘.",
 ]
+VALUATION_STRESS_QUESTION_SEEDS = [
+    "삼성전자의 최신 사업보고서 주석에서 CapEx와 운전자본 계획을 추출하고, 향후 10년 FCF를 예측해 적정 주가를 계산해줘.",
+    "SK하이닉스의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘.",
+    "원/달러 환율 급락, 기준금리 상승, 반도체 가격 하락이 동시에 발생하면 삼성전자의 영업이익과 적정 주가가 얼마나 하락할지 분석해줘.",
+    "현대차의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘.",
+    "LG에너지솔루션의 매출 성장률과 영업이익률이 동시에 하락하는 스트레스 시나리오를 분석해줘.",
+    "삼성전기의 향후 10년 FCF를 예측하고 WACC와 영구성장률에 따른 적정 주가를 계산해줘.",
+    "삼성전자 DCF 가치평가에서 매출 성장률과 영업이익률 변화가 적정 주가에 미치는 영향을 분석해줘.",
+    "기준금리가 1%p 상승하고 원/달러 환율이 10% 오르면 현대차의 영업이익과 적정 주가는 어떻게 변할까?",
+    "삼성전자의 WACC를 6~10%, 영구성장률을 1~4%로 변경해 적정 주가 민감도를 분석해줘.",
+    "LG에너지솔루션의 WACC를 7~11%, 영구성장률을 1~4%로 변경해 적정 주가 민감도 표를 만들어줘.",
+    "삼성전기의 WACC를 7~10%, 영구성장률을 1~3%로 변경해 적정 주가 민감도를 분석해줘.",
+    "기아의 WACC를 7~11%, 영구성장률을 1~4%로 변경해 적정 주가 민감도 표를 만들어줘.",
+    "삼성전자의 향후 10년 FCF를 예측하고 DCF 방식으로 적정 주가를 계산해줘.",
+    "SK하이닉스의 향후 10년 FCF를 예측하고 DCF 방식으로 적정 주가를 계산해줘.",
+    "현대차의 향후 10년 FCF를 예측하고 WACC와 영구성장률을 반영한 적정 주가를 계산해줘.",
+    "LG에너지솔루션의 향후 10년 FCF를 예측하고 DCF 방식으로 적정 주가를 계산해줘.",
+    "기아의 향후 10년 FCF를 예측하고 적정 주가를 계산해줘.",
+    "기준금리가 1%p 상승하고 원/달러 환율이 10% 오르면 기아의 영업이익과 적정가치는 어떻게 변할까?",
+    "기준금리가 1%p 상승하고 원/달러 환율이 10% 하락하면 LG에너지솔루션의 영업이익과 적정가치는 어떻게 변할까?",
+    "기준금리가 0.5%p 상승하고 원/달러 환율이 8% 오르면 삼성전기의 영업이익과 적정가치는 어떻게 변할까?",
+    "기준금리 상승과 원/달러 환율 하락이 동시에 발생하면 삼성전자의 영업이익과 적정가치 변화를 분석해줘.",
+    "원/달러 환율 급락, 기준금리 상승, 반도체 가격 하락이 동시에 발생하면 SK하이닉스의 영업이익과 적정 주가가 얼마나 하락할지 분석해줘.",
+    "삼성전자 DCF에서 WACC 상승과 영구성장률 하락이 적정 주가에 미치는 스트레스를 분석해줘.",
+    "SK하이닉스 DCF에서 매출 성장률 둔화와 영업이익률 하락이 적정가치에 미치는 영향을 분석해줘.",
+    "현대차 DCF에서 매출 성장률과 영업이익률이 동시에 하락하는 스트레스 시나리오를 분석해줘.",
+]
+OTHER_QUESTION_SEEDS = [
+    "NPV와 IRR의 차이와 투자안 선택 기준을 설명해줘.",
+    "회수기간법과 할인회수기간법의 차이를 설명해줘.",
+    "명목이자율과 실효이자율의 차이를 예시로 설명해줘.",
+    "영구연금과 성장영구연금의 현재가치 공식을 비교해줘.",
+    "CAPM의 가정과 현실적인 한계를 설명해줘.",
+    "체계적 위험과 비체계적 위험의 차이를 설명해줘.",
+    "샤프지수와 트레이너지수의 차이를 설명해줘.",
+    "젠센의 알파가 의미하는 바를 설명해줘.",
+    "효율적 투자선과 무차별곡선의 관계를 설명해줘.",
+    "블랙숄즈 모형으로 콜옵션 가격을 계산할 때 필요한 변수를 알려줘.",
+    "콜옵션의 델타와 감마가 의미하는 위험을 설명해줘.",
+    "풋콜패리티를 이용한 차익거래 원리를 설명해줘.",
+    "채권 듀레이션과 볼록성의 차이를 설명해줘.",
+    "금리가 상승할 때 채권 가격이 하락하는 이유를 설명해줘.",
+    "합병 시너지와 합병 NPV의 관계를 설명해줘.",
+    "현금 인수와 주식교환 인수의 장단점을 비교해줘.",
+    "대리인 문제와 배당정책의 관계를 설명해줘.",
+    "정보비대칭이 기업의 자금조달 순서에 미치는 영향을 설명해줘.",
+    "경제적 부가가치와 시장부가가치의 차이를 설명해줘.",
+    "민감도 분석과 시뮬레이션 분석의 차이를 설명해줘.",
+]
 
 _cached_questions: list[str] = []
 _last_refreshed = 0.0
@@ -190,7 +239,7 @@ def _init_questions_file():
             q for q in questions
             if _is_recommendation_question_eligible(q)
         ]
-        questions = list(dict.fromkeys([*ADVANCED_QUESTION_SEEDS, *questions]))
+        questions = list(dict.fromkeys([*VALUATION_STRESS_QUESTION_SEEDS, *OTHER_QUESTION_SEEDS, *ADVANCED_QUESTION_SEEDS, *questions]))
         questions = _limit_recommendation_families(questions)
         if len(questions) < RECOMMENDED_QUESTION_POOL_SIZE:
             generated = _generate_question_pool(RECOMMENDED_QUESTION_POOL_SIZE)
@@ -287,7 +336,7 @@ def _generate_question_pool(limit: int) -> list[str]:
     candidates.extend(template.format(industry=industry) for industry in industries for template in industry_templates)
     candidates = list(dict.fromkeys(
         normalize_company_pair_particles(candidate)
-        for candidate in [*DEFAULT_SEEDS, *ADVANCED_QUESTION_SEEDS, *candidates]
+        for candidate in [*DEFAULT_SEEDS, *VALUATION_STRESS_QUESTION_SEEDS, *OTHER_QUESTION_SEEDS, *ADVANCED_QUESTION_SEEDS, *candidates]
     ))
     random.shuffle(candidates)
     return candidates[:limit]
@@ -335,6 +384,26 @@ def _append_verified_successful_question(question: str) -> None:
             json.dump(questions, f, ensure_ascii=False, indent=2)
     except Exception as exc:
         logger.error("Failed to log verified successful question: %s", exc)
+
+
+def _remove_unanswerable_recommendation(question: str) -> None:
+    cleaned = normalize_company_pair_particles(question.strip())
+    if not cleaned:
+        return
+    with _file_write_lock:
+        for path in (QUESTIONS_FILE, VERIFIED_SUCCESSFUL_QUESTIONS_FILE):
+            try:
+                if not os.path.exists(path):
+                    continue
+                with open(path, "r", encoding="utf-8") as file:
+                    questions = json.load(file)
+                filtered = [item for item in questions if item != cleaned]
+                if len(filtered) == len(questions):
+                    continue
+                with open(path, "w", encoding="utf-8") as file:
+                    json.dump(filtered, file, ensure_ascii=False, indent=2)
+            except Exception as exc:
+                logger.warning("Failed to remove an unanswerable recommendation: %s", exc)
 
 
 def _is_verified_successful_result(question: str, result: dict) -> bool:
@@ -393,27 +462,37 @@ def _comparison_pair_is_same_industry(question: str) -> bool:
     return first.industry_name == second.industry_name
 
 
+RECOMMENDATION_CATEGORIES = (
+    "financial_metrics",
+    "stock_investment",
+    "valuation_stress",
+    "news",
+    "other",
+)
+
+
 def _question_family(question: str) -> str:
     compact = question.replace(" ", "").lower()
     if any(token in compact for token in [
-        "dcf", "fcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
-        "스트레스", "복합충격", "최대샤프", "최소분산", "포트폴리오", "시나리오",
+        "dcf", "fcf", "wacc", "영구성장률", "적정가치", "적정주가",
+        "스트레스", "복합충격", "민감도",
     ]):
-        return "advanced"
-    if "주가" in compact and any(token in compact for token in ["흐름", "변동성", "수익률", "최대낙폭", "mdd", "차트"]):
-        return "stock"
+        return "valuation_stress"
     if any(token in compact for token in ["뉴스", "동향", "업황", "이슈"]):
         return "news"
-    if any(token in compact for token in ["전망", "예측"]):
-        return "advanced"
     if any(token in compact for token in [
+        "주가", "종가", "최대낙폭", "mdd", "포트폴리오", "최대샤프", "최소분산",
+        "몬테카를로", "기대수익률분포", "유리할확률",
+    ]):
+        return "stock_investment"
+    if any(token in compact for token in [
+        "재무지표", "매출", "영업이익", "당기순이익", "순이익", "실적", "현금흐름",
+        "자산", "부채", "자본", "성장률", "cagr",
         "유동비율", "당좌비율", "부채비율", "매출총이익률", "영업이익률",
         "당기순이익률", "순이익률", "roe", "roa", "per", "pbr",
     ]):
-        return "ratio"
-    if any(token in compact for token in ["업종", "산업", "대표기업", "상위"]):
-        return "industry"
-    return "financial"
+        return "financial_metrics"
+    return "other"
 
 
 def _is_recommendation_question_eligible(question: str) -> bool:
@@ -428,8 +507,8 @@ def _is_recommendation_question_eligible(question: str) -> bool:
 
 
 def _limit_recommendation_families(questions: list[str]) -> list[str]:
-    """Keep industry prompts scarce while preserving a broad advanced-analysis pool."""
-    limits = {"industry": 15}
+    """Keep the five recommendation categories large enough for varied rotation."""
+    limits = {"valuation_stress": 25, "news": 35}
     counts: dict[str, int] = {}
     selected: list[str] = []
     for question in questions:
@@ -442,7 +521,13 @@ def _limit_recommendation_families(questions: list[str]) -> list[str]:
 
 
 def _replacement_question_index(questions: list[str], incoming: str) -> int:
-    family_limits = {"stock": 30, "news": 25, "advanced": 65, "ratio": 45, "industry": 15, "financial": 70}
+    family_limits = {
+        "financial_metrics": 65,
+        "stock_investment": 45,
+        "valuation_stress": 25,
+        "news": 35,
+        "other": 30,
+    }
     grouped: dict[str, list[int]] = {}
     for index, question in enumerate(questions):
         grouped.setdefault(_question_family(question), []).append(index)
@@ -486,7 +571,7 @@ def log_failed_question(question: str, status: str, error_message: str):
             logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return five diverse questions, including two advanced-analysis prompts."""
+    """Return exactly one question from each of the five product categories."""
     global _last_recommended_questions
     _init_questions_file()
     with _file_write_lock:
@@ -502,50 +587,20 @@ def _generate_guaranteed_questions() -> list[str]:
         if len(available) < RECOMMENDED_QUESTION_COUNT:
             available = questions
 
+        fallbacks = {
+            "financial_metrics": DEFAULT_SEEDS[0],
+            "stock_investment": "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
+            "valuation_stress": VALUATION_STRESS_QUESTION_SEEDS[1],
+            "news": DEFAULT_SEEDS[-1],
+            "other": "NPV와 IRR의 차이를 설명해줘",
+        }
         selected: list[str] = []
-        required = [
-            (_is_news_api_question, DEFAULT_SEEDS[-1]),
-            (_is_stock_recommendation_question, "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘"),
-            (_is_advanced_recommendation_question, "SK하이닉스의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘."),
-        ]
-        for predicate, fallback in required:
-            candidates = [q for q in available if q not in selected and predicate(q)]
+        for category in RECOMMENDATION_CATEGORIES:
+            candidates = [q for q in available if q not in selected and _question_family(q) == category]
             if not candidates:
-                candidates = [q for q in questions if q not in selected and predicate(q)]
-            selected.append(random.choice(candidates) if candidates else fallback)
+                candidates = [q for q in questions if q not in selected and _question_family(q) == category]
+            selected.append(random.choice(candidates) if candidates else fallbacks[category])
 
-        second_advanced = [
-            q for q in available
-            if q not in selected and _is_advanced_recommendation_question(q)
-        ]
-        if not second_advanced:
-            second_advanced = [
-                q for q in questions
-                if q not in selected and _is_advanced_recommendation_question(q)
-            ]
-        if second_advanced:
-            selected.append(random.choice(second_advanced))
-
-        if not any(_mentions_top_five_company(question) for question in selected):
-            top_candidates = [q for q in available if q not in selected and _mentions_top_five_company(q)]
-            if not top_candidates:
-                top_candidates = [q for q in questions if q not in selected and _mentions_top_five_company(q)]
-            selected.append(random.choice(top_candidates) if top_candidates else DEFAULT_SEEDS[0])
-
-        neutral_candidates = [
-            q for q in available
-            if q not in selected
-            and not _is_news_api_question(q)
-            and not _is_stock_recommendation_question(q)
-            and not _is_advanced_recommendation_question(q)
-        ]
-        needed = RECOMMENDED_QUESTION_COUNT - len(selected)
-        candidate_pool = list(neutral_candidates)
-        if len(candidate_pool) < needed:
-            candidate_pool.extend(q for q in questions if q not in selected and q not in candidate_pool)
-        selected.extend(random.sample(candidate_pool, min(needed, len(candidate_pool))))
-            
-        random.shuffle(selected)
         _last_recommended_questions = set(selected)
     return selected
 
@@ -660,6 +715,8 @@ def chat(request: ChatRequest) -> StreamingResponse:
             result_status = (res.get("calculation") or {}).get("status") or res.get("status")
             if result_status == "ok" and not request.attachment and _is_verified_successful_result(request.question, res):
                 log_successful_question(request.question)
+            elif result_status in {"needs_company", "no_data", "missing_data", "missing_shares"}:
+                _remove_unanswerable_recommendation(request.question)
             res["suggestions"] = find_similar_successful_questions(request.question)
             q.put(f"event: result\ndata: {json.dumps(res, ensure_ascii=False)}\n\n")
         except Exception as e:

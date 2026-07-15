@@ -866,21 +866,23 @@ def _analyze_representative_sector_snapshot(
 
 
 def _analyze_market_comparison(question: str, store: FinancialStatementStore, companies: list[Any]) -> dict[str, Any]:
-    company_summaries = []
-    news_results = []
-    documents = []
-    for company in companies:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def analyze_one_company(company: Any) -> dict[str, Any] | None:
         available_years = store.available_years(company.stock_code)
         if not available_years:
-            continue
+            return None
         period = _extract_period(question, available_years)
         ratio_keys = _extract_ratio_accounts(question)
         account_keys = _extract_accounts(question, ratio_keys)
         if not account_keys:
             account_keys = ["revenue", "operating_income", "net_income"]
         series = store.get_account_series(company.stock_code, account_keys, period.start_year, period.end_year)
-        series = _fill_missing_series_with_yfinance(company, account_keys, series, period)
+
+        # DART is the authoritative fallback for Korean statements. Query missing
+        # fiscal years first and use Yahoo only for values DART could not provide.
         series = _fill_missing_series_with_dart(company, account_keys, series, period)
+        series = _fill_missing_series_with_yfinance(company, account_keys, series, period)
         ratio_series = _build_ratio_series(series, ratio_keys)
         dart_fetch = None
         if ratio_keys and not ratio_series:
@@ -888,30 +890,36 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
             if dart_ratio_row:
                 ratio_series = [dart_ratio_row]
         metrics = [] if ratio_series else _build_metric_summary(series, account_keys)
-        company_summaries.append(
-            {
-                "company": company.__dict__,
-                "period": period.__dict__,
-                "series": series,
-                "ratio_series": ratio_series,
-                "ratio_keys": ratio_keys,
-                "metrics": metrics,
-                "dart_fetch": dart_fetch,
-            }
-        )
-        if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
-            news_result = _try_fetch_news(company, question)
-            news_results.append({"company": company.company_name, **news_result})
-            if news_result.get("status") == "ok":
-                documents.extend(_news_documents_only(search_external_docs(news_result.get("query", question), company.company_name, limit=10))[:3])
-        else:
-            news_results.append(
-                {
-                    "company": company.company_name,
-                    "status": "missing_config",
-                    "message": "최근 주가/뉴스 비교에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
-                }
-            )
+        return {
+            "company": company.__dict__,
+            "period": period.__dict__,
+            "series": series,
+            "ratio_series": ratio_series,
+            "ratio_keys": ratio_keys,
+            "metrics": metrics,
+            "dart_fetch": dart_fetch,
+        }
+
+    with ThreadPoolExecutor(max_workers=min(4, len(companies))) as executor:
+        company_summaries = [item for item in executor.map(analyze_one_company, companies) if item]
+
+    news_results = []
+    documents = []
+    if _should_fetch_news(question):
+        for company in companies:
+            if get_news_env("NAVER_CLIENT_ID") and get_news_env("NAVER_CLIENT_SECRET"):
+                news_result = _try_fetch_news(company, question)
+                news_results.append({"company": company.company_name, **news_result})
+                if news_result.get("status") == "ok":
+                    documents.extend(_news_documents_only(search_external_docs(news_result.get("query", question), company.company_name, limit=10))[:3])
+            else:
+                news_results.append(
+                    {
+                        "company": company.company_name,
+                        "status": "missing_config",
+                        "message": "최근 주가/뉴스 비교에는 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET 설정이 필요합니다.",
+                    }
+                )
 
     steps = [
         "비교 대상: " + ", ".join(f"{item['company']['company_name']}({item['company']['stock_code']})" for item in company_summaries),
@@ -940,7 +948,11 @@ def _analyze_market_comparison(question: str, store: FinancialStatementStore, co
         "comparison": company_summaries,
         "external_references": documents,
         "news_fetch": {
-            "status": "ok" if any(result.get("status") == "ok" for result in news_results) else "missing_config",
+            "status": (
+                "not_requested"
+                if not _should_fetch_news(question)
+                else "ok" if any(result.get("status") == "ok" for result in news_results) else "missing_config"
+            ),
             "count": sum(result.get("count", 0) for result in news_results),
             "results": news_results,
         },
@@ -1544,24 +1556,32 @@ def _fill_missing_series_with_yfinance(company: Any, account_keys: list[str], se
     try:
         yf_ticker = yf.Ticker(ticker_str)
         dfs = []
-        try:
-            financials = yf_ticker.financials
-            if financials is not None and not financials.empty:
-                dfs.append(financials)
-        except Exception:
-            pass
-        try:
-            balance_sheet = yf_ticker.balance_sheet
-            if balance_sheet is not None and not balance_sheet.empty:
-                dfs.append(balance_sheet)
-        except Exception:
-            pass
-        try:
-            cashflow = yf_ticker.cashflow
-            if cashflow is not None and not cashflow.empty:
-                dfs.append(cashflow)
-        except Exception:
-            pass
+        income_keys = {"operating_income", "revenue", "net_income"}
+        balance_keys = {
+            "total_assets", "total_equity", "total_liabilities", "current_assets",
+            "current_liabilities", "inventories",
+        }
+        if income_keys.intersection(missing_keys):
+            try:
+                financials = yf_ticker.financials
+                if financials is not None and not financials.empty:
+                    dfs.append(financials)
+            except Exception:
+                pass
+        if balance_keys.intersection(missing_keys):
+            try:
+                balance_sheet = yf_ticker.balance_sheet
+                if balance_sheet is not None and not balance_sheet.empty:
+                    dfs.append(balance_sheet)
+            except Exception:
+                pass
+        if "operating_cash_flow" in missing_keys:
+            try:
+                cashflow = yf_ticker.cashflow
+                if cashflow is not None and not cashflow.empty:
+                    dfs.append(cashflow)
+            except Exception:
+                pass
 
         if not dfs:
             return series
@@ -1628,17 +1648,47 @@ def _fill_missing_series_with_dart(company: Any, account_keys: list[str], series
     if not missing_years:
         return series
 
-    try:
+    def fetch_year(fiscal_year: int) -> dict[str, Any]:
         client = DartClient()
+        last_result: dict[str, Any] = {"status": "error", "message": "DART 조회에 실패했습니다."}
+        for fs_div in ("CFS", "OFS"):
+            try:
+                result = client.fetch_financial_accounts(
+                    stock_code=company.stock_code,
+                    corp_name=company.company_name,
+                    fiscal_year=fiscal_year,
+                    fs_div=fs_div,
+                )
+                if result.get("status") == "ok":
+                    return result
+                last_result = result
+            except Exception as exc:
+                last_result = {"status": "error", "message": str(exc)}
+        return last_result
+
+    try:
+        # A single annual DART response contains the current and two comparative
+        # periods. Reuse those fields instead of issuing one request per year.
+        anchor_year = max(missing_years)
+        result = fetch_year(anchor_year)
+        if result.get("status") != "ok":
+            return series
+        raw_accounts = result.get("accounts") or []
+        amount_fields = {
+            anchor_year: "thstrm_amount",
+            anchor_year - 1: "frmtrm_amount",
+            anchor_year - 2: "bfefrmtrm_amount",
+        }
         for fiscal_year in missing_years:
-            result = client.fetch_financial_accounts(
-                stock_code=company.stock_code,
-                corp_name=company.company_name,
-                fiscal_year=fiscal_year,
-            )
-            if result.get("status") != "ok":
+            amount_field = amount_fields.get(fiscal_year)
+            if not amount_field:
                 continue
-            accounts = _map_dart_accounts(result.get("accounts") or [])
+            normalized_accounts = [
+                {**account, "thstrm_amount": account.get(amount_field)}
+                for account in raw_accounts
+                if str(account.get(amount_field) or "").strip()
+            ]
+            accounts = _map_dart_accounts(normalized_accounts)
             row = rows_by_year.setdefault(fiscal_year, {"year": fiscal_year})
             for key in account_keys:
                 if isinstance(row.get(key), dict) and row[key].get("amount") is not None:

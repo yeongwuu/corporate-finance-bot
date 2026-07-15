@@ -637,7 +637,8 @@ h2 {
 .attach-button::after,
 .capsule-attach-btn::after,
 .send-button::after,
-.capsule-send-btn::after {
+.capsule-send-btn::after,
+.message-action-btn::after {
   position: absolute;
   right: 50%;
   bottom: calc(100% + 8px);
@@ -667,9 +668,31 @@ h2 {
 .send-button:hover::after,
 .send-button:focus-visible::after,
 .capsule-send-btn:hover::after,
-.capsule-send-btn:focus-visible::after {
+.capsule-send-btn:focus-visible::after,
+.message-action-btn:hover::after,
+.message-action-btn:focus-visible::after {
   opacity: 1;
   transform: translateX(50%) translateY(0);
+}
+
+.message-actions {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0 0;
+}
+
+.message-action-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .composer button:hover:not(:disabled) {

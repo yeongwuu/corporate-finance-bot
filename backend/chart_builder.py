@@ -127,6 +127,21 @@ def _build_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
 
     company = calculation.get("company") or {}
     period = calculation.get("period") or {}
+    dataset_keys = {dataset.get("key") for dataset in datasets}
+    use_dual_axis = "revenue" in dataset_keys and bool(
+        dataset_keys.intersection({"operating_income", "net_income"})
+    )
+    if use_dual_axis:
+        for dataset in datasets:
+            dataset["axis"] = "revenue" if dataset.get("key") == "revenue" else "profit"
+        return {
+            "type": "line",
+            "title": f"{company.get('company_name', '기업')} 주요 재무지표 추이",
+            "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
+            "unit": "KRW",
+            "dual_axis": True,
+            "datasets": datasets,
+        }
     if _should_use_compact_bar(datasets):
         return {
             "type": "compact_metric_bar",

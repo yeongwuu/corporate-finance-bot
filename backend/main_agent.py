@@ -519,7 +519,7 @@ def select_tool(question: str) -> str:
         or ("wacc" in compact and "영구성장률" in compact and "민감도" in compact)
         or ("환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]))
         or ("기준금리" in compact and "환율" in compact)
-        or (any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf"]) and any(token in compact for token in ["적정주가", "기업가치", "fcf"]))
+        or (any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf"]) and any(token in compact for token in ["적정주가", "적정가치", "기업가치", "fcf"]))
     ):
         return "advanced_analysis_tool"
 

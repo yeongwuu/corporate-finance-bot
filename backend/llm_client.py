@@ -80,6 +80,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_portfolio_optimization_answer(calculation)
     if calculation.get("mode") == "cost_of_sales_ear" and calculation.get("status") == "ok":
         return build_cost_of_sales_ear_answer(calculation)
+    if calculation.get("mode") == "macro_scenario" and calculation.get("status") == "ok":
+        return build_macro_scenario_answer(calculation)
         
     if calculation.get("status") == "latest_news":
         # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
@@ -121,6 +123,52 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         except Exception:
             return build_rule_based_answer(tool_name, calculation, references)
     return build_rule_based_answer(tool_name, calculation, references)
+
+
+def build_macro_scenario_answer(calculation: dict) -> str:
+    def format_money(value: float) -> str:
+        if abs(value) >= 1_0000_0000_0000:
+            return f"{value / 1_0000_0000_0000:.2f}조원"
+        if abs(value) >= 1_0000_0000:
+            return f"{value / 1_0000_0000:.2f}억원"
+        return f"{value:,.0f}원"
+
+    company = calculation.get("company") or {}
+    company_name = company.get("company_name", "대상 기업")
+    assumptions = calculation.get("assumptions") or {}
+    base_income = float(calculation.get("base_operating_income") or 0)
+    scenario_income = float(calculation.get("scenario_operating_income") or 0)
+    income_change = scenario_income / base_income - 1 if base_income else 0
+    value_change = float(calculation.get("value_change") or 0)
+    rate_shock = float(assumptions.get("rate_shock") or 0)
+    fx_shock = float(assumptions.get("fx_shock") or 0)
+    debt_ratio = float(assumptions.get("debt_ratio") or 0)
+    fx_elasticity = float(assumptions.get("fx_elasticity") or 0)
+    rate_elasticity = float(assumptions.get("rate_elasticity") or 0)
+    fx_effect = fx_shock * fx_elasticity
+    rate_effect = -rate_shock * rate_elasticity
+    base_wacc = 0.085
+    scenario_wacc = base_wacc + rate_shock * debt_ratio
+    scenario_price = calculation.get("scenario_price")
+
+    lines = [
+        f"{company_name}의 금리·환율 복합 시나리오 분석 결과입니다.",
+        "",
+        f"- 기준금리 {rate_shock * 100:.1f}%p 상승 효과: 영업이익 {rate_effect * 100:+.2f}%",
+        f"- 원/달러 환율 {fx_shock * 100:.1f}% 상승 효과: 영업이익 {fx_effect * 100:+.2f}%",
+        f"- 복합 효과: 영업이익 {format_money(base_income)} → {format_money(scenario_income)} ({income_change * 100:+.2f}%)",
+        f"- WACC 가정: {base_wacc * 100:.2f}% → {scenario_wacc * 100:.2f}%",
+        f"- 적정가치 대용 변화율: {value_change * 100:+.2f}%",
+    ]
+    if scenario_price is not None:
+        lines.append(f"- 현재 주가 조정 방식의 시나리오 가격: {float(scenario_price):,.0f}원")
+    else:
+        lines.append("- 현재 주가를 확보하지 못해 주가 금액 대신 적정가치 대용 변화율만 제시했습니다.")
+    lines.extend([
+        "",
+        "환율·금리 탄력도와 WACC 변화에 기반한 시나리오이며, DCF 민감도 표의 최저·최고 적정 주가 범위는 아닙니다.",
+    ])
+    return "\n".join(lines)
 
 
 def build_cost_of_sales_ear_answer(calculation: dict) -> str:

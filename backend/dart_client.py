@@ -302,7 +302,8 @@ class DartClient:
         url = f"{DART_BASE_URL}/{endpoint}?{urllib.parse.urlencode(query)}"
         request = urllib.request.Request(url, headers={"User-Agent": "corporate-finance-bot/0.1"})
         context = _ssl_context()
-        with urllib.request.urlopen(request, timeout=30, context=context) as response:
+        timeout = float(os.getenv("DART_HTTP_TIMEOUT_SECONDS", "8"))
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
             return response.read()
 
 
