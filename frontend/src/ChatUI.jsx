@@ -65,7 +65,7 @@ const FALLBACK_RECOMMENDED_QUESTIONS = [
   "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
   "셀트리온의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
   "한화에어로스페이스의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
-  "LIG넥스원의 최근 3개년 주요 재무계정 추이를 분석해줘",
+  "LIG넥스원의 최근 3개년 주요 재무지표 추이를 분석해줘",
   "에스엠의 최근 1년 주가 수익률과 변동성을 계산해줘",
   "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
   "삼성전자의 최근 5개년 PER 추이를 계산해줘",
@@ -686,6 +686,7 @@ function buildFallbackRecommendedQuestions() {
 
 function MessageText({ message, onAskSuggestion }) {
   const [visibleText, setVisibleText] = useState(message.meta?.animate ? "" : message.content);
+  const [isTyping, setIsTyping] = useState(Boolean(message.meta?.animate));
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [feedbackBurst, setFeedbackBurst] = useState(null);
@@ -695,10 +696,12 @@ function MessageText({ message, onAskSuggestion }) {
   useEffect(() => {
     if (!message.meta?.animate) {
       setVisibleText(message.content);
+      setIsTyping(false);
       return undefined;
     }
 
     setVisibleText("");
+    setIsTyping(true);
     let index = 0;
     const step = Math.max(2, Math.min(10, Math.floor(message.content.length / 180)));
     const timerId = window.setInterval(() => {
@@ -706,6 +709,7 @@ function MessageText({ message, onAskSuggestion }) {
       setVisibleText(message.content.slice(0, index));
       if (index >= message.content.length) {
         window.clearInterval(timerId);
+        setIsTyping(false);
       }
     }, 16);
 
@@ -762,6 +766,11 @@ function MessageText({ message, onAskSuggestion }) {
       ) : (
         <>
           <div className="message-body">{formatAnswerText(visibleText)}</div>
+          {isTyping ? (
+            <div className="answer-writing-dots" aria-label="답변 작성 중">
+              <LoadingDots />
+            </div>
+          ) : null}
           <ChartPanel chart={message.meta?.chart} compact />
           <SuggestionPanel
             suggestions={message.meta?.suggestions}
@@ -779,9 +788,9 @@ function MessageText({ message, onAskSuggestion }) {
             onClick={copyMessage}
             aria-label="답변 복사"
             title="답변 복사"
-            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
+            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
@@ -792,9 +801,9 @@ function MessageText({ message, onAskSuggestion }) {
             onClick={shareQuestionAndAnswer}
             aria-label="질문과 답변 공유"
             title={shared ? "공유했습니다" : "질문과 답변 공유"}
-            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#F2550A', fontWeight: 600 }}
+            style={{ background: 'transparent', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2550A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" />
               <circle cx="6" cy="12" r="3" />
               <circle cx="18" cy="19" r="3" />
@@ -921,11 +930,21 @@ function LoadingTrace({ activeStep, stepTexts }) {
     <div className="loading-trace" aria-label="실시간 처리 과정" style={{ marginTop: 0, marginBottom: 0 }}>
       <div className="active">
         <p className="loading-step-text" style={{ marginTop: '2px', marginBottom: '2px', display: 'flex', alignItems: 'center' }}>
-          <span aria-hidden="true" className="hourglass" style={{ marginRight: '6px' }}>⏳</span>
+          <LoadingDots />
           {currentStepText}
         </p>
       </div>
     </div>
+  );
+}
+
+function LoadingDots() {
+  return (
+    <span aria-hidden="true" className="loading-dots">
+      <span />
+      <span />
+      <span />
+    </span>
   );
 }
 
@@ -1216,7 +1235,7 @@ function extractMetric(question) {
     ["유동비율", ["유동비율"]],
   ];
   const match = rules.find(([, tokens]) => tokens.some((token) => compact.includes(token.toLowerCase())));
-  return match ? match[0] : "주요 재무계정";
+  return match ? match[0] : "주요 재무지표";
 }
 
 function extractContextKeyword(question, metric) {
@@ -1440,7 +1459,7 @@ function ChartPanel({ chart, compact = false }) {
 
 function LineChart({ chart }) {
   const option = useMemo(() => {
-    const colors = ["#F2550A", "#E59A2F", "#A63A00", "#D95C2B"];
+    const colors = ["#FF530A", "#E59A2F", "#A63A00", "#D95C2B"];
     const labels = [...new Map(
       chart.datasets.flatMap((dataset) => dataset.points.map((point) => [String(point.x), point.label || String(point.x)]))
     ).values()];

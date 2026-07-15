@@ -1181,7 +1181,7 @@ def _extract_ratio_accounts(question: str) -> list[str]:
         ratio_keys.append("selling_admin_expense_ratio")
     if any(token in compact for token in ["매출액영업이익률", "영업이익률", "영업마진", "operatingmargin"]):
         ratio_keys.append("operating_margin")
-    if any(token in compact for token in ["매출액순이익률", "순이익률", "순이익마진", "netmargin"]):
+    if any(token in compact for token in ["매출액순이익률", "당기순이익률", "순이익률", "순이익마진", "netmargin"]):
         ratio_keys.append("net_margin")
     if any(token in compact for token in ["roa", "총자산이익률", "총자산순이익률"]):
         ratio_keys.append("roa")

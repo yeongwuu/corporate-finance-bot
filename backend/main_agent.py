@@ -534,7 +534,10 @@ def select_tool(question: str) -> str:
         return "finance_concept_tool"
 
     # Route stability/profitability ratios for specific companies or time-series to company_trend_tool
-    if any(word in normalized for word in ["유동비율", "당좌비율", "현금비율", "부채비율", "자기자본비율", "이자보상비율", "roe", "roa"]):
+    if any(word in normalized for word in [
+        "유동비율", "당좌비율", "현금비율", "부채비율", "자기자본비율", "이자보상비율",
+        "매출총이익률", "매출액총이익률", "영업이익률", "당기순이익률", "순이익률", "roe", "roa",
+    ]):
         if any(word in normalized for word in ["추이", "성장률", "연도별", "최근", "최신", "개년", "기간", "변동", "년도"]):
             return "company_trend_tool"
         try:
@@ -548,8 +551,12 @@ def select_tool(question: str) -> str:
     if any(word in normalized for word in ["동향", "업황", "최근 동향", "최근동향", "산업동향", "산업 동향"]) and any(word in normalized for word in ["산업", "업종", "섹터", "분야", "시장"]):
         return "company_trend_tool"
 
-    # Route general account trend questions (even if company name is missing initially)
-    if any(word in normalized for word in ["재무계정", "계정추이", "주요계정", "주요 계정", "계정"]) and any(word in normalized for word in ["추이", "분석", "흐름"]):
+    # Route general financial metric trend questions (even if company name is missing initially)
+    if any(word in normalized for word in [
+        "재무지표", "지표추이", "주요지표", "주요 지표",
+        # Keep legacy wording compatible with previously saved conversations.
+        "재무계정", "계정추이", "주요계정", "주요 계정", "계정",
+    ]) and any(word in normalized for word in ["추이", "분석", "흐름"]):
         return "company_trend_tool"
 
     if _is_forecast_question(normalized):

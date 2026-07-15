@@ -244,7 +244,7 @@ def _build_account_bar_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
     year = calculation.get("year")
     return {
         "type": "bar",
-        "title": f"{company.get('company_name', '기업')} 주요 재무계정",
+        "title": f"{company.get('company_name', '기업')} 주요 재무지표",
         "subtitle": f"{year}년 당기 기준" if year else "",
         "unit": "KRW",
         "bars": bars,

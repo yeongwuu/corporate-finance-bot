@@ -56,7 +56,7 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
                 f"{base_msg}\n\n"
                 f"💡 **대체 질문 추천**:\n"
                 f"현재 동일 업종인 **'{industry_name}'**에 속해 있으면서 엑셀 재무 데이터가 확보된 {peer_names}의 재무 분석을 요청하시는 것은 어떨까요?\n"
-                f"예: `\"{peers[0]['company_name']} 최근 3개년 주요 재무계정 추이를 분석해줘\"`"
+                f"예: `\"{peers[0]['company_name']} 최근 3개년 주요 재무지표 추이를 분석해줘\"`"
             )
         return base_msg + " 다른 기업명이나 종목코드로 다시 시도해 주세요."
 

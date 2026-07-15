@@ -1,11 +1,11 @@
 :root {
   color: #182026;
   background: #f5f2ee;
-  --accent: #d04a02;
+  --accent: #FF530A;
   --accent-dark: #a63a00;
   --accent-soft: #fff2e8;
   --accent-border: #f0b58d;
-  --user-message: #f2550a;
+  --user-message: var(--accent);
   --danger: #b33a2b;
   --surface: #ffffff;
   --surface-muted: #fbf8f5;
@@ -54,7 +54,7 @@ button {
 
 .eyebrow {
   margin: 0;
-  color: #F2550A;
+  color: var(--accent);
   font-size: 31px;
   font-weight: 800;
   line-height: 1.03;
@@ -241,21 +241,43 @@ h2 {
   font-size: 13px;
 }
 
-.hourglass {
-  display: inline-block;
-  font-size: 0.92em;
-  animation: hourglass-pulse 1.2s ease-in-out infinite;
+.loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 12px;
+  margin-right: 7px;
 }
 
-@keyframes hourglass-pulse {
-  0%,
-  100% {
-    transform: translateY(0);
+.loading-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: loading-dot-bounce 0.9s ease-in-out infinite;
+}
+
+.loading-dots > span:nth-child(2) { animation-delay: 0.12s; }
+.loading-dots > span:nth-child(3) { animation-delay: 0.24s; }
+
+.answer-writing-dots {
+  display: flex;
+  align-items: center;
+  min-height: 18px;
+  margin-top: 8px;
+}
+
+.answer-writing-dots .loading-dots {
+  margin-right: 0;
+}
+
+@keyframes loading-dot-bounce {
+  0%, 60%, 100% {
+    transform: translateY(2px);
     opacity: 0.55;
   }
-
-  50% {
-    transform: translateY(-1px);
+  30% {
+    transform: translateY(-3px);
     opacity: 1;
   }
 }
@@ -544,7 +566,7 @@ h2 {
 }
 
 .composer:focus-within {
-  border-color: #F2550A;
+  border-color: var(--accent);
   box-shadow: 0 8px 32px rgba(242, 85, 10, 0.12);
 }
 
@@ -1210,7 +1232,7 @@ h2 {
 .hero-logo-title {
   font-size: 62px;
   font-weight: 800;
-  color: #F2550A;
+  color: var(--accent);
   margin-bottom: 38px;
   letter-spacing: 0;
   line-height: 1.03;
@@ -1292,7 +1314,7 @@ h2 {
 }
 
 .capsule-composer:focus-within {
-  border-color: #F2550A;
+  border-color: var(--accent);
   box-shadow: 0 8px 32px rgba(242, 85, 10, 0.12);
 }
 

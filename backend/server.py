@@ -127,15 +127,15 @@ RECOMMENDED_QUESTION_POOL_SIZE = 200
 TOP_FIVE_COMPANIES = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"]
 DEFAULT_SEEDS = [
     "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
-    "SK하이닉스의 최근 2개년 유동비율과 당좌비율을 알려줘",
+    "SK하이닉스의 최근 2개년 유동비율, 당좌비율과 부채비율 추이를 분석해줘",
     "셀트리온의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
     "한화에어로스페이스의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
-    "LIG넥스원의 최근 3개년 주요 재무계정 추이를 분석해줘",
+    "LIG넥스원의 최근 3개년 주요 재무지표 추이를 분석해줘",
     "에스엠의 최근 1년 주가 수익률과 변동성을 계산해줘",
     "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
     "삼성전자의 최근 5개년 PER 추이를 계산해줘",
     "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
-    "셀트리온의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+    "셀트리온의 최근 3개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
     "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘"
 ]
 
@@ -185,9 +185,9 @@ def _generate_question_pool(limit: int) -> list[str]:
 
     company_templates = [
         "{company}의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
-        "{company}의 최근 5개년 주요 재무계정 추이를 분석해줘",
-        "{company}의 최근 2개년 유동비율과 당좌비율을 알려줘",
-        "{company}의 최근 3개년 부채비율과 ROE 추이를 분석해줘",
+        "{company}의 최근 5개년 주요 재무지표 추이를 분석해줘",
+        "{company}의 최근 2개년 유동비율, 당좌비율과 부채비율 추이를 분석해줘",
+        "{company}의 최근 3개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
         "{company}의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
         "{company}의 최근 3년 주가 흐름을 차트로 보여줘",
         "{company}의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
@@ -346,7 +346,10 @@ def _question_family(question: str) -> str:
         return "news"
     if any(token in compact for token in ["전망", "예측"]):
         return "advanced"
-    if any(token in compact for token in ["유동비율", "당좌비율", "부채비율", "roe", "roa", "per", "pbr"]):
+    if any(token in compact for token in [
+        "유동비율", "당좌비율", "부채비율", "매출총이익률", "영업이익률",
+        "당기순이익률", "순이익률", "roe", "roa", "per", "pbr",
+    ]):
         return "ratio"
     if any(token in compact for token in ["업종", "산업", "대표기업", "상위"]):
         return "industry"
