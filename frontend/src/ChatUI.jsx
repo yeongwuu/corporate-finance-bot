@@ -550,7 +550,7 @@ export default function ChatUI() {
               </div>
             </form>
             <p className="server-start-notice">
-              첫 접속 시 서버 시작에 최대 2분이 걸릴 수 있습니다. 로딩이 완료되면 추천 질문을 선택해 챗봇을 시작해 보세요!
+              첫 접속 시 서버 시작에 최대 2분이 소요 될 수 있습니다. 추천 질문을 선택해 챗봇을 시작해 보세요.
             </p>
           </div>
         </section>

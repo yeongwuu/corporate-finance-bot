@@ -98,8 +98,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_market_ratio_trend_answer(calculation)
     if calculation.get("mode") == "roi_per_comparison":
         return build_roi_per_comparison_answer(calculation)
-    if calculation.get("mode") == "rf_stock_forecast":
-        return build_rf_stock_forecast_answer(calculation)
+    if calculation.get("mode") == "arima_stock_forecast":
+        return build_arima_stock_forecast_answer(calculation)
     if calculation.get("ratio_series"):
         return build_ratio_trend_answer(calculation)
     if calculation.get("comparison"):
@@ -241,70 +241,51 @@ def build_ratio_trend_answer(calculation: dict) -> str:
     return "\n".join(lines)
 
 
-def build_rf_stock_forecast_answer(calculation: dict) -> str:
+def build_arima_stock_forecast_answer(calculation: dict) -> str:
     company = calculation.get("company") or {}
     company_name = company.get("company_name", "해당 기업")
-    latest_close = calculation.get("latest_close") or 0.0
-    predicted_next_close = calculation.get("predicted_next_close") or 0.0
-    pred_return = calculation.get("pred_return") or 0.0
+    latest_close = float(calculation.get("latest_close") or 0.0)
+    predicted_close = float(calculation.get("predicted_next_close") or 0.0)
+    pred_return = float(calculation.get("pred_return") or 0.0)
     forecast_label = calculation.get("forecast_label") or "다음 영업일"
-    test_r2 = calculation.get("test_r2") or 0.0
-    test_mae = calculation.get("test_mae") or 0.0
+    model_name = calculation.get("model_name") or "랜덤워크"
     forecast_values = calculation.get("forecast_values") or []
-    model_name = calculation.get("model_name") or "기간별 직접 랜덤포레스트"
-    rf_test_r2 = calculation.get("rf_test_r2", test_r2)
-    rf_test_mae = calculation.get("rf_test_mae", test_mae)
-    rf_naive_test_mae = calculation.get("rf_naive_test_mae")
-    lstm_test_r2 = calculation.get("lstm_test_r2")
-    lstm_test_mae = calculation.get("lstm_test_mae")
-    weights = calculation.get("ensemble_weights") or {"rf": 1.0, "lstm": 0.0}
+    lower_values = calculation.get("forecast_lower") or []
+    upper_values = calculation.get("forecast_upper") or []
+    arima_mae = calculation.get("arima_test_mae")
+    naive_mae = calculation.get("naive_test_mae")
 
     from tools.stock_price_tool import _format_krw
 
     lines = [
-        f"🤖 **RF·LSTM 주가 예측 결과**",
-        f"",
-        f"**{company_name}**의 과거 주가 시계열 데이터를 학습시켜 {forecast_label} 종가를 예측했습니다. 최종 선택 모델은 **{model_name}**입니다.",
-        f"",
-        f"*   **최신 종가 (현재가)**: {_format_krw(latest_close)}",
-        f"*   **예측 종가 ({forecast_label})**: **{_format_krw(predicted_next_close)}** (변동 예상치: **{pred_return:+.2f}%**)",
-        f"",
-        f"📊 **모델 검증 지표 (Model Validation Metrics)**",
-        f"*   **RF**: 누적수익률 $R^2$ `{rf_test_r2:.4f}`, 가격 MAE `{_format_krw(rf_test_mae)}`",
-        (
-            f"*   **LSTM**: 누적수익률 $R^2$ `{lstm_test_r2:.4f}`, 가격 MAE `{_format_krw(lstm_test_mae)}`"
-            if lstm_test_r2 is not None and lstm_test_mae is not None
-            else "*   **LSTM**: 실행 환경 또는 데이터 조건을 충족하지 못해 적용하지 않았습니다."
-        ),
-        f"*   **최종 가중치**: RF `{weights.get('rf', 1.0)*100:.1f}%`, LSTM `{weights.get('lstm', 0.0)*100:.1f}%`",
-        (f"*   **무변동 기준 가격 MAE**: `{_format_krw(rf_naive_test_mae)}`" if rf_naive_test_mae is not None else ""),
+        "주가 시계열 예측 결과",
+        "",
+        f"{company_name}의 최근 종가 {_format_krw(latest_close)}를 기준으로 {forecast_label} 종가를 예측했습니다.",
+        f"시간순 롤링 검증 결과 선택된 모델은 {model_name}입니다.",
+        "",
+        f"- 예상 종가: {_format_krw(predicted_close)} ({pred_return:+.2f}%)",
+        f"- 95% 예측구간: {_format_krw(lower_values[-1])}~{_format_krw(upper_values[-1])}",
+        "",
+        "모델 검증",
+        f"- ARIMA MAE: {_format_krw(arima_mae) if arima_mae is not None else '계산 실패'}",
+        f"- 랜덤워크 MAE: {_format_krw(naive_mae) if naive_mae is not None else '계산 실패'}",
     ]
     if len(forecast_values) > 1:
-        lines.extend(
-            [
-                "",
-                "📅 **영업일별 예측 경로**",
-                *[f"*   **{index}영업일 뒤**: {_format_krw(value)}" for index, value in enumerate(forecast_values, 1)],
-            ]
-        )
-    if rf_test_r2 < 0 and (lstm_test_r2 is None or lstm_test_r2 < 0):
-        naive_comparison = ""
-        if rf_naive_test_mae and rf_naive_test_mae > 0:
-            improvement = (1 - rf_test_mae / rf_naive_test_mae) * 100
-            naive_comparison = f" 다만 RF 가격 MAE는 무변동 기준보다 {improvement:+.2f}% 개선됐습니다."
-        lines.extend(
-            [
-                "",
-                "⚠️ **검증 주의**: 누적수익률 결정계수가 0보다 낮아 평균 수익률만 사용하는 기준보다 방향 설명력이 낮습니다."
-                f"{naive_comparison} 위 수치는 실험적 추정치이며 {forecast_label} 방향성 판단이나 투자 의사결정에 사용하기 어렵습니다.",
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "💡 *RF는 최근 로그수익률·변동성·모멘텀을, LSTM은 최근 40영업일의 연속 로그수익률을 학습합니다. 예측 수익률을 최신 종가에 누적 적용하며, 시간순 검증 MAE가 불리한 LSTM은 최종 예측에서 제외됩니다. 실제 주가는 거시 경제 변수, 기업 이슈, 시장 수급 등에 의해 달라질 수 있습니다.*",
-        ]
-    )
+        lines.extend(["", "영업일별 예측"])
+        for index, value in enumerate(forecast_values):
+            lower = lower_values[index] if index < len(lower_values) else value
+            upper = upper_values[index] if index < len(upper_values) else value
+            lines.append(
+                f"- {index + 1}영업일 뒤: {_format_krw(value)} "
+                f"(95% 예측구간 {_format_krw(lower)}~{_format_krw(upper)})"
+            )
+    if arima_mae is not None and naive_mae:
+        improvement = (1 - float(arima_mae) / float(naive_mae)) * 100
+        lines.extend(["", f"ARIMA의 검증 오차는 랜덤워크 대비 {improvement:+.2f}% 차이입니다."])
+    lines.extend([
+        "",
+        "주가는 잡음과 외부 변수의 영향이 크므로 예측값보다 예측구간을 함께 확인해야 합니다. 투자 추천이나 목표주가 의견은 아닙니다.",
+    ])
     return "\n".join(lines)
 
 

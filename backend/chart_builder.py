@@ -26,8 +26,8 @@ def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, A
         return _build_stock_price_comparison_chart(calculation)
     if calculation.get("mode") == "portfolio_optimization":
         return _build_portfolio_optimization_chart(calculation)
-    if calculation.get("mode") == "rf_stock_forecast":
-        return _build_rf_stock_forecast_chart(calculation)
+    if calculation.get("mode") == "arima_stock_forecast":
+        return _build_arima_stock_forecast_chart(calculation)
     if tool_name == "company_trend_tool":
         comparison_chart = _build_company_financial_comparison_chart(calculation)
         if comparison_chart:
@@ -452,7 +452,7 @@ def _format_amount(amount: float) -> str:
     return f"{sign}{amount:,.0f}원"
 
 
-def _build_rf_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
+def _build_arima_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
     prices_list = calculation.get("prices_list") or []
     if not prices_list:
         return None
@@ -471,7 +471,7 @@ def _build_rf_stock_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any
     forecast_label = calculation.get("forecast_label") or "다음 영업일"
     return {
         "type": "line",
-        "title": f"{company.get('company_name', '기업')} 주가 및 RF·LSTM 예측 전망",
+        "title": f"{company.get('company_name', '기업')} ARIMA·랜덤워크 주가 예측",
         "subtitle": f"최근 15영업일 + {forecast_label} 예측",
         "unit": "KRW_PRICE",
         "datasets": [
