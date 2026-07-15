@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from llm_client import build_final_answer
+from llm_client import UNSUPPORTED_COMPANY_MESSAGE, build_final_answer
 from main_agent import select_tool
 from tools.industry_rank_tool import (
     _extract_industry,
@@ -12,6 +12,7 @@ from company_data.financial_store import FinancialStatementStore
 
 
 QUESTION = "기타 비금속 광물제품 제조업 업종에서 가장 매출액이 큰 기업 5개사를 알려줘"
+PROFESSIONAL_SERVICES_QUESTION = "기타 전문 서비스업 업종에서 가장 매출액이 큰 기업 5개사를 알려줘"
 
 
 class IndustryRankToolTest(unittest.TestCase):
@@ -26,6 +27,22 @@ class IndustryRankToolTest(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 5)
         self.assertTrue(
             all(row["industry_name"] == "기타 비금속 광물제품 제조업" for row in rows)
+        )
+
+    def test_professional_services_expands_to_detailed_industry_label(self):
+        self.assertEqual(
+            _extract_industry(PROFESSIONAL_SERVICES_QUESTION),
+            "기타 전문 서비스업",
+        )
+        rows = _query_industry_candidates(
+            FinancialStatementStore(), "기타 전문 서비스업", 5
+        )
+        self.assertGreaterEqual(len(rows), 5)
+        self.assertTrue(
+            any(
+                row["industry_name"] == "그 외 기타 전문, 과학 및 기술 서비스업"
+                for row in rows
+            )
         )
 
     def test_rank_falls_back_to_dart_revenue(self):
@@ -62,6 +79,16 @@ class IndustryRankToolTest(unittest.TestCase):
         answer = build_final_answer(QUESTION, "industry_rank_tool", calculation, [])
         self.assertEqual(answer, calculation["summary"])
         self.assertNotIn("해당 기업의 재무 데이터", answer)
+
+    def test_unknown_company_uses_supported_market_message(self):
+        answer = build_final_answer(
+            "해외 기업의 최근 매출을 분석해줘",
+            "company_trend_tool",
+            {"status": "needs_company"},
+            [],
+        )
+        self.assertEqual(answer, UNSUPPORTED_COMPANY_MESSAGE)
+        self.assertIn("코스피·코스닥", answer)
 
 
 if __name__ == "__main__":

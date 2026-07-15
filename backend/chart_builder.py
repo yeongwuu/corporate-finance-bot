@@ -373,7 +373,7 @@ def _build_forecast_chart(calculation: dict[str, Any]) -> dict[str, Any] | None:
         "unit": "KRW",
         "preserve_combined_scale": True,
         "datasets": [
-            {"key": "actual", "label": "실적", "points": actual_points, "color": "#F2550A"},
+            {"key": "actual", "label": "실적", "points": actual_points, "color": "#FF530A"},
             {
                 "key": "low_forecast",
                 "label": "보수 전망",
@@ -504,6 +504,7 @@ def _build_portfolio_optimization_chart(calculation: dict[str, Any]) -> dict[str
             "caption": "포트폴리오별 투자 비중",
             "headers": ["기업", "최대 샤프", "최소분산"],
             "rows": [[name, f"{weight*100:.2f}%", f"{min_weights.get(name, 0)*100:.2f}%"] for name, weight in weights.items()],
+            "layout": "balanced",
         },
     }
 

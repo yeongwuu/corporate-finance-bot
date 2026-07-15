@@ -591,7 +591,14 @@ def _fetch_listed_shares(stock_code: str, market: str | None = None) -> float | 
             return float(shares)
     except Exception:
         pass
-    return 50000000.0
+    # Stable fallbacks for core companies keep valuation usable when free-hosting
+    # environments temporarily block the market-data endpoints.
+    known_listed_shares = {
+        "005930": 5_969_782_550.0,  # 삼성전자 보통주
+        "005380": 211_531_506.0,    # 현대차 보통주
+        "051910": 70_592_343.0,     # LG화학 보통주
+    }
+    return known_listed_shares.get(stock_code.zfill(6))
 
 
 def _fetch_trailing_per(stock_code: str, market: str | None) -> float | None:

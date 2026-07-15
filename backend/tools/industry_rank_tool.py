@@ -97,6 +97,14 @@ SECTOR_ALIASES = {
     "엔터테인먼트": ["엔터테인먼트", "엔터사", "엔터 기업", "연예기획사"],
 }
 
+INDUSTRY_KEYWORD_ALIASES = {
+    # The source workbook uses both the short KRX label and the detailed KSIC label.
+    "기타 전문 서비스업": [
+        "기타 전문 서비스업",
+        "그 외 기타 전문, 과학 및 기술 서비스업",
+    ],
+}
+
 
 def resolve_representative_sector(text: str) -> str | None:
     compact = text.replace(" ", "").lower()
@@ -646,6 +654,8 @@ def _keywords_for_industry(industry: str) -> list[str]:
         return SEMICONDUCTOR_KEYWORDS
     if industry == "방산":
         return ["방산", "방위", "국방", "항공", "우주", "무기", "탄약", "군수"]
+    if industry in INDUSTRY_KEYWORD_ALIASES:
+        return INDUSTRY_KEYWORD_ALIASES[industry]
     return [industry]
 
 

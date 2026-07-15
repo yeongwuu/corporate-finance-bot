@@ -1022,7 +1022,7 @@ def calculate_optimal_portfolio(question: str) -> dict:
         
     steps.append(f"최적 포트폴리오 연율화 기대수익률: {opt_return*100:.2f}%")
     steps.append(f"최적 포트폴리오 연율화 표준편차(위험): {opt_vol*100:.2f}%")
-    steps.append(f"최대 샤프 비율 (Sharpe Ratio): {opt_sharpe:.4f}")
+    steps.append(f"최대 샤프지수: {opt_sharpe:.4f}")
     steps.append(f"최소분산 포트폴리오 연율화 기대수익률 {min_var_return*100:.2f}%, 변동성 {min_var_vol*100:.2f}%, 샤프 비율 {min_var_sharpe:.4f}")
     
     return {

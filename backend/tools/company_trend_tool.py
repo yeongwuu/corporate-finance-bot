@@ -1008,6 +1008,12 @@ def _extract_peer_industry(question: str, base_company: Any) -> str:
     related_company_match = re.search(r"^\s*(.+?)\s+관련\s+(?:기업들|기업|회사들|회사)", question)
     if related_company_match:
         return re.sub(r"^기타\s*", "", related_company_match.group(1)).strip()
+    explicit_industry_match = re.search(
+        r"^\s*(.+?)\s+(?:산업|업종|섹터)(?=(?:에서|의|내|중|별|에|으로)?(?:\s|$))",
+        question,
+    )
+    if explicit_industry_match:
+        return explicit_industry_match.group(1).strip(" ?.,!")
     match = re.search(r"([가-힣A-Za-z0-9]+)\s*(?:기업들|업종|산업|섹터)", question)
     if match:
         ret = match.group(1)

@@ -13,16 +13,30 @@ from typing import Any
 BACKEND_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_ROOT.parent
 
+UNSUPPORTED_COMPANY_MESSAGE = (
+    "요청하신 기업을 분석 대상에서 확인하지 못했습니다. "
+    "이 챗봇은 국내 코스피·코스닥 상장기업 및 데이터베이스에 등록된 주요 기업을 중심으로 분석합니다. "
+    "지원되는 기업명 또는 6자리 종목코드로 다시 질문해 주세요."
+)
+
 
 def build_final_answer(question: str, tool_name: str, calculation: dict, references: list[dict]) -> str:
     if calculation.get("status") == "needs_company":
-        return "어떤 기업이 궁금하세요? 분석할 기업명 또는 종목코드를 알려주세요."
+        return UNSUPPORTED_COMPANY_MESSAGE
 
     if tool_name == "industry_rank_tool" and calculation.get("status") == "no_data":
         return build_industry_rank_answer(calculation)
 
     if calculation.get("status") == "no_data":
+        industry = calculation.get("industry")
+        if industry:
+            return (
+                calculation.get("summary")
+                or f"{industry} 업종은 비교 가능한 기업 재무 데이터가 충분하지 않습니다. 다른 업종으로 다시 질문해 주세요."
+            )
         company = calculation.get("company") or {}
+        if not company:
+            return UNSUPPORTED_COMPANY_MESSAGE
         company_name = company.get("company_name") or "해당 기업"
         stock_code = company.get("stock_code") or ""
         industry_name = company.get("industry_name")
@@ -606,13 +620,17 @@ def build_stock_price_answer(calculation: dict) -> str:
             f"기간 수익률은 {stats.get('cumulative_return_display', '-')}입니다."
         )
         lines.append(
+            f"일평균 수익률은 {stats.get('daily_return_mean_display', '-')}, "
+            f"일간 수익률 변동성은 {stats.get('daily_return_std_display', '-')}이며, "
+            f"이를 연율화한 변동성은 {stats.get('annualized_volatility_display', '-')}입니다. "
+            f"연율화 수익률은 {stats.get('annualized_return_display', '-')}입니다."
+        )
+        lines.append(
             f"조회 기간의 최저 종가는 {_format_display_price(stats.get('min_close'))}, "
             f"최고 종가는 {_format_display_price(stats.get('max_close'))}, "
-            f"종가 평균은 {_format_display_price(stats.get('close_mean'))}, "
-            f"종가 표준편차는 {_format_display_price(stats.get('close_std'))}, "
             f"최대낙폭은 {stats.get('max_drawdown_display', '-')}입니다."
         )
-    lines.append("아래 그래프는 같은 기간의 종가 추이를 나타냅니다. 투자 추천이나 목표주가 의견은 아닙니다.")
+    lines.append("아래 종가 그래프는 수익률과 변동성이 계산된 기간의 가격 흐름을 보조적으로 보여줍니다. 투자 추천이나 목표주가 의견은 아닙니다.")
     return "\n".join(lines)
 
 
@@ -1138,10 +1156,10 @@ def build_portfolio_optimization_answer(calculation: dict) -> str:
         "#### 2. 포트폴리오 기대 성과 요약",
         f"- **연율화 기대수익률 (Expected Return)**: **{calculation.get('expected_return')*100:.2f}%**",
         f"- **연율화 표준편차 (Portfolio Risk)**: **{calculation.get('volatility')*100:.2f}%**",
-        f"- **포트폴리오 Sharpe Ratio**: **{calculation.get('sharpe_ratio'):.4f}**",
+        f"- **포트폴리오 샤프지수**: **{calculation.get('sharpe_ratio'):.4f}**",
         f"- **최소분산 기대수익률**: **{calculation.get('min_variance_expected_return')*100:.2f}%**",
         f"- **최소분산 표준편차**: **{calculation.get('min_variance_volatility')*100:.2f}%**",
-        f"- **최소분산 Sharpe Ratio**: **{calculation.get('min_variance_sharpe_ratio'):.4f}**",
+        f"- **최소분산 포트폴리오 샤프지수**: **{calculation.get('min_variance_sharpe_ratio'):.4f}**",
         "",
         f"총 {calculation.get('observations', 0):,}개 공통 거래일을 사용한 SLSQP 최적화 결과이며, 공매도는 허용하지 않고 비중 합계는 100%로 제한했습니다. 과거 수익률은 미래 성과를 보장하지 않습니다."
     ]

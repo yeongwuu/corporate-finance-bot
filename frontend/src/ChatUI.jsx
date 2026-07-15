@@ -30,6 +30,45 @@ const API_URL =
   import.meta.env?.VITE_API_URL ||
   (API_HOSTNAME ? `https://${API_HOSTNAME}` : "http://localhost:8000");
 
+const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);
+
+function isNetworkLoadError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return ["failed to fetch", "load failed", "networkerror", "network request failed"].some((text) => message.includes(text));
+}
+
+function retryDelay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timerId = window.setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      window.clearTimeout(timerId);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+}
+
+async function fetchWithRetry(url, options = {}, retryOptions = {}) {
+  const attempts = retryOptions.attempts || 3;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, options);
+      if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt === attempts - 1) {
+        return response;
+      }
+      lastError = new Error(`Temporary server error (${response.status})`);
+    } catch (error) {
+      if (error?.name === "AbortError" || !isNetworkLoadError(error) || attempt === attempts - 1) {
+        throw error;
+      }
+      lastError = error;
+    }
+    retryOptions.onRetry?.(attempt + 1);
+    await retryDelay(1500 * (attempt + 1), options.signal);
+  }
+  throw lastError || new Error("Network request failed");
+}
+
 function formatMessageTimestamp(dateObj) {
   const hours = dateObj.getHours();
   const minutes = dateObj.getMinutes();
@@ -151,6 +190,12 @@ export default function ChatUI() {
   }, []);
 
   useEffect(() => {
+    fetchWithRetry(`${API_URL}/health`, { cache: "no-store" }, { attempts: 2 }).catch((error) => {
+      console.warn("Backend warm-up failed", error);
+    });
+  }, []);
+
+  useEffect(() => {
     fetchRecommendedQuestions();
     const interval = window.setInterval(fetchRecommendedQuestions, 600000);
     return () => clearInterval(interval);
@@ -219,20 +264,25 @@ export default function ChatUI() {
     abortControllerRef.current = abortController;
 
     try {
-      const response = await fetch(`${API_URL}/api/chat`, {
+      const chatRequestOptions = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: displayQuestion, history, attachment }),
         signal: abortController.signal,
+      };
+      let response = await fetchWithRetry(`${API_URL}/api/chat`, chatRequestOptions, {
+        attempts: 3,
+        onRetry: () => setStepTexts((prev) => {
+          const next = [...prev];
+          next[Math.max(0, activeStep)] = "서버 연결을 다시 시도하고 있습니다.";
+          return next;
+        }),
       });
 
       if (!response.ok) {
         throw new Error("Request failed");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
       let data = null;
 
       const processEventBlock = (block) => {
@@ -274,22 +324,35 @@ export default function ChatUI() {
         }
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const consumeEventStream = async (streamResponse) => {
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
 
-        const eventBlocks = buffer.split(/\r?\n\r?\n/);
-        buffer = eventBlocks.pop() || "";
-        eventBlocks.filter(Boolean).forEach(processEventBlock);
+          const eventBlocks = buffer.split(/\r?\n\r?\n/);
+          buffer = eventBlocks.pop() || "";
+          eventBlocks.filter(Boolean).forEach(processEventBlock);
 
-        if (done) {
-          if (buffer.trim()) processEventBlock(buffer);
-          break;
+          if (done) {
+            if (buffer.trim()) processEventBlock(buffer);
+            break;
+          }
         }
-      }
+      };
+
+      await consumeEventStream(response);
 
       if (!data) {
-        throw new Error("답변 데이터를 수신하지 못했습니다.");
+        setStepTexts((prev) => [...prev, "끊긴 답변 연결을 다시 복구하고 있습니다."]);
+        response = await fetchWithRetry(`${API_URL}/api/chat`, chatRequestOptions, { attempts: 2 });
+        if (!response.ok) throw new Error("Request failed");
+        await consumeEventStream(response);
+      }
+      if (!data) {
+        throw new Error("서버 연결이 끝까지 유지되지 않았습니다. 잠시 후 다시 시도해 주세요.");
       }
 
       const answer = data.answer || "답변을 생성하지 못했습니다.";
@@ -333,8 +396,8 @@ export default function ChatUI() {
       const answer =
         error.name === "AbortError"
           ? "요청을 취소했습니다."
-          : error.message === "Failed to fetch"
-            ? "백엔드 서버에 연결하지 못했습니다."
+          : isNetworkLoadError(error)
+            ? "서버 연결이 일시적으로 끊겼습니다. 무료 서버가 시작 중일 수 있으니 잠시 후 다시 시도해 주세요."
             : error.message;
       const errorSuggestions = Array.isArray(error.suggestions)
         ? error.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2)
@@ -443,7 +506,7 @@ export default function ChatUI() {
                 type="text"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="이곳에 질문을 입력하세요!"
+                placeholder="이곳에 질문을 입력하세요."
                 className="capsule-input"
                 disabled={isLoading}
               />
@@ -461,8 +524,8 @@ export default function ChatUI() {
                 <button
                   type="button"
                   className="capsule-attach-btn"
-                  data-tooltip="문제를 업로드하세요!"
-                  title="문제를 업로드하세요!"
+                  data-tooltip="문제를 업로드하세요."
+                  title="문제를 업로드하세요."
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
                   style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
@@ -475,7 +538,7 @@ export default function ChatUI() {
                   type="submit"
                   className="capsule-send-btn"
                   disabled={!canSubmit}
-                  data-tooltip="질문을 전송합니다!"
+                  data-tooltip="질문을 전송합니다."
                   aria-label="질문 전송"
                   style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
                 >
@@ -486,6 +549,9 @@ export default function ChatUI() {
                 </button>
               </div>
             </form>
+            <p className="server-start-notice">
+              첫 접속 시 서버 시작에 최대 2분이 걸릴 수 있습니다. 로딩이 완료되면 추천 질문을 선택해 챗봇을 시작해 보세요!
+            </p>
           </div>
         </section>
       ) : (
@@ -550,7 +616,7 @@ export default function ChatUI() {
                 sendMessage();
               }
             }}
-            placeholder="이곳에 질문을 입력하세요!"
+            placeholder="이곳에 질문을 입력하세요."
             rows={3}
           />
           <input
@@ -563,8 +629,8 @@ export default function ChatUI() {
           <button
             type="button"
             className="attach-button"
-            data-tooltip="문제를 업로드하세요!"
-            title="문제를 업로드하세요!"
+            data-tooltip="문제를 업로드하세요."
+            title="문제를 업로드하세요."
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
             style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'end' }}
@@ -578,7 +644,7 @@ export default function ChatUI() {
             className={isLoading ? "send-button cancel-button" : "send-button"}
             disabled={!isLoading && !canSubmit}
             onClick={isLoading ? cancelMessage : undefined}
-            data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다!"}
+            data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다."}
             aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
             style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end' }}
           >
@@ -846,17 +912,21 @@ function FailureConsentPanel({ request }) {
     setIsSubmitting(true);
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/api/failed-question-log`, {
+      const response = await fetchWithRetry(`${API_URL}/api/failed-question-log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...request, consent: true }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "기록하지 못했습니다.");
+      }, { attempts: 3 });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "서버가 준비되지 않아 기록하지 못했습니다. 잠시 후 다시 시도해 주세요.");
       setDecision("agreed");
       setNotice("감사합니다.");
     } catch (error) {
-      setNotice(error.message || "기록하지 못했습니다.");
+      setNotice(
+        isNetworkLoadError(error)
+          ? "서버 연결이 끊겨 기록하지 못했습니다. 잠시 후 다시 시도해 주세요."
+          : error.message || "기록하지 못했습니다."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -1466,12 +1536,13 @@ function LineChart({ chart }) {
     const initialVisiblePercent = getInitialLineChartVisiblePercent(labels.length);
     const hasInitialZoom = initialVisiblePercent < 100;
     const zoomStart = 100 - initialVisiblePercent;
+    const isForecastChart = chart.datasets.some((dataset) => dataset.forecast);
     return {
       animationDuration: 650,
       animationEasing: "cubicOut",
       color: colors,
       aria: { enabled: true, decal: { show: false } },
-      grid: { top: chart.datasets.length > 1 ? 54 : 30, right: 26, bottom: hasInitialZoom ? 58 : 34, left: 72, containLabel: false },
+      grid: { top: isForecastChart ? 72 : chart.datasets.length > 1 ? 54 : 30, right: 34, bottom: hasInitialZoom ? 58 : 34, left: 72, containLabel: false },
       legend: chart.datasets.length > 1 ? {
         top: 4,
         right: 8,
@@ -1523,6 +1594,7 @@ function LineChart({ chart }) {
         const highlightedPoint = dataset.forecast ? dataset.points.at(-1) : maxPoint;
         const highlightedPointIndex = dataset.points.indexOf(highlightedPoint);
         const highlightedLabelPosition = highlightedPointIndex === 0 ? "right" : highlightedPointIndex === dataset.points.length - 1 ? "left" : "top";
+        const showHighlightedLabel = !dataset.forecast || dataset.key === "base_forecast";
         return {
           name: dataset.label,
           type: "line",
@@ -1538,7 +1610,7 @@ function LineChart({ chart }) {
             symbol: "circle",
             symbolSize: 11,
             itemStyle: { color: "#ffffff", borderColor: seriesColor, borderWidth: 3 },
-            label: { show: true, position: highlightedLabelPosition, distance: 8, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: highlightedPoint.display },
+            label: { show: showHighlightedLabel, position: highlightedLabelPosition, distance: 8, color: "#27323a", fontSize: 10, fontWeight: 700, formatter: highlightedPoint.display },
             data: [{ coord: [highlightedPoint.label || String(highlightedPoint.x), Number(highlightedPoint.y)], value: Number(highlightedPoint.y), name: dataset.forecast ? "전망" : "최댓값" }],
           } : undefined,
         };
@@ -1560,7 +1632,7 @@ function ChartDataTable({ table }) {
   return (
     <div className="chart-data-table-wrap">
       {table.caption ? <strong className="chart-data-table-caption">{table.caption}</strong> : null}
-      <table className="chart-data-table">
+      <table className={`chart-data-table${table.layout === "balanced" ? " balanced" : ""}`}>
         <thead>
           <tr>{table.headers.map((header) => <th key={header}>{header}</th>)}</tr>
         </thead>

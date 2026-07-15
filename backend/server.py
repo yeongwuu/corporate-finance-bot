@@ -138,6 +138,24 @@ DEFAULT_SEEDS = [
     "셀트리온의 최근 3개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
     "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘"
 ]
+CURATED_RECOMMENDATION_INDUSTRIES = [
+    "반도체", "바이오", "방산", "자동차", "2차전지", "엔터테인먼트",
+    "증권", "은행", "보험", "소프트웨어", "건설", "화학",
+]
+ADVANCED_QUESTION_SEEDS = [
+    "삼성전자의 최신 사업보고서 주석에서 CapEx와 운전자본 계획을 추출하고, 향후 10년 FCF를 예측해 적정 주가를 계산해줘.",
+    "SK하이닉스의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘.",
+    "삼성전자·SK하이닉스·삼성전기의 최근 5년 주가를 이용해 최대 샤프지수 포트폴리오와 최소분산 포트폴리오를 구성해줘.",
+    "원/달러 환율 급락, 기준금리 상승, 반도체 가격 하락이 동시에 발생하면 삼성전자의 영업이익과 적정 주가가 얼마나 하락할지 분석해줘.",
+    "삼성전자와 SK하이닉스의 향후 수익률 분포를 몬테카를로 시뮬레이션으로 비교해줘.",
+    "현대차의 WACC를 7~11%, 영구성장률을 1~4%로 변경하면서 적정 주가 민감도 표를 만들어줘.",
+    "LG에너지솔루션의 매출 성장률과 영업이익률이 동시에 하락하는 스트레스 시나리오를 분석해줘.",
+    "삼성전자·SK하이닉스·삼성전기의 최근 3년 주가로 위험 대비 수익률이 가장 높은 포트폴리오를 구성해줘.",
+    "삼성전기의 향후 10년 FCF를 예측하고 WACC와 영구성장률에 따른 적정 주가를 계산해줘.",
+    "SK하이닉스의 환율과 반도체 가격 변동에 따른 영업이익 시나리오를 분석해줘.",
+    "현대차·기아·현대모비스의 최근 5년 주가를 이용해 최대 샤프지수 포트폴리오와 최소분산 포트폴리오를 구성해줘.",
+    "삼성전자 DCF 가치평가에서 매출 성장률과 영업이익률 변화가 적정 주가에 미치는 영향을 분석해줘.",
+]
 
 _cached_questions: list[str] = []
 _last_refreshed = 0.0
@@ -168,14 +186,20 @@ def _init_questions_file():
             for q in questions
             if isinstance(q, str) and q.strip()
         ]
-        questions = list(dict.fromkeys(questions))
+        questions = [
+            q for q in questions
+            if _is_recommendation_question_eligible(q)
+        ]
+        questions = list(dict.fromkeys([*ADVANCED_QUESTION_SEEDS, *questions]))
+        questions = _limit_recommendation_families(questions)
         if len(questions) < RECOMMENDED_QUESTION_POOL_SIZE:
             generated = _generate_question_pool(RECOMMENDED_QUESTION_POOL_SIZE)
-            questions = list(dict.fromkeys([*questions, *generated]))[:RECOMMENDED_QUESTION_POOL_SIZE]
+            questions = list(dict.fromkeys([*questions, *generated]))
+            questions = _limit_recommendation_families(questions)
+        questions = questions[:RECOMMENDED_QUESTION_POOL_SIZE]
 
-        if not os.path.exists(QUESTIONS_FILE) or len(questions) >= RECOMMENDED_QUESTION_POOL_SIZE:
-            with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
-                json.dump(questions, f, ensure_ascii=False, indent=2)
+        with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(questions, f, ensure_ascii=False, indent=2)
 
 
 def _generate_question_pool(limit: int) -> list[str]:
@@ -199,12 +223,10 @@ def _generate_question_pool(limit: int) -> list[str]:
         "{industry} 업종의 매출 상위 5개 기업을 알려줘",
     ]
     fallback_companies = ["삼성전자", "SK하이닉스", "셀트리온", "한화시스템", "LIG넥스원"]
-    curated_industries = [
-        "반도체", "바이오", "방산", "자동차", "2차전지", "엔터테인먼트",
-        "증권", "은행", "보험", "소프트웨어", "건설", "화학",
-    ]
+    curated_industries = CURATED_RECOMMENDATION_INDUSTRIES
 
     companies = []
+    company_industries: list[tuple[str, str]] = []
     industries = list(curated_industries)
     try:
         store = FinancialStatementStore()
@@ -227,21 +249,22 @@ def _generate_question_pool(limit: int) -> list[str]:
                     """
                 ).fetchall()
             ]
-            db_industries = [
-                row[0]
+            company_industries = [
+                (str(row[0]), str(row[1]))
                 for row in conn.execute(
                     """
-                    SELECT industry_name
+                    SELECT company_name, industry_name
                     FROM financial_items
-                    WHERE industry_name != '' AND stock_code != ''
-                    GROUP BY industry_name
-                    HAVING COUNT(DISTINCT stock_code) >= 5
-                    ORDER BY COUNT(DISTINCT stock_code) DESC
-                    LIMIT 20
+                    WHERE stock_code != ''
+                      AND industry_name != ''
+                      AND company_name NOT LIKE '%스팩%'
+                      AND company_name NOT LIKE '%기업인수목적%'
+                    GROUP BY stock_code, company_name, industry_name
+                    HAVING COUNT(DISTINCT fiscal_year) >= 5
+                    ORDER BY industry_name, RANDOM()
                     """
                 ).fetchall()
             ]
-            industries = list(dict.fromkeys([*curated_industries, *db_industries]))
         finally:
             conn.close()
     except Exception as exc:
@@ -249,8 +272,23 @@ def _generate_question_pool(limit: int) -> list[str]:
 
     companies = companies or fallback_companies
     candidates = [template.format(company=company) for company in companies for template in company_templates]
+    by_industry: dict[str, list[str]] = {}
+    for company_name, industry_name in company_industries:
+        by_industry.setdefault(industry_name, []).append(company_name)
+    for industry_companies in by_industry.values():
+        unique_companies = list(dict.fromkeys(industry_companies))
+        random.shuffle(unique_companies)
+        for index in range(0, len(unique_companies) - 1, 2):
+            first, second = unique_companies[index:index + 2]
+            candidates.extend([
+                f"{first}과 {second}의 최근 3개년 매출액과 영업이익을 비교해줘",
+                f"{first}과 {second}의 최근 2년 주가 흐름을 비교해줘",
+            ])
     candidates.extend(template.format(industry=industry) for industry in industries for template in industry_templates)
-    candidates = list(dict.fromkeys([*DEFAULT_SEEDS, *candidates]))
+    candidates = list(dict.fromkeys(
+        normalize_company_pair_particles(candidate)
+        for candidate in [*DEFAULT_SEEDS, *ADVANCED_QUESTION_SEEDS, *candidates]
+    ))
     random.shuffle(candidates)
     return candidates[:limit]
 
@@ -258,6 +296,8 @@ def log_successful_question(question: str):
     _init_questions_file()
     cleaned = normalize_company_pair_particles(question.strip())
     if not cleaned or len(cleaned) < 5 or len(cleaned) > 100:
+        return
+    if not _comparison_pair_is_same_industry(cleaned):
         return
     with _file_write_lock:
         try:
@@ -333,10 +373,30 @@ def _is_verified_successful_result(question: str, result: dict) -> bool:
     return True
 
 
+def _comparison_pair_is_same_industry(question: str) -> bool:
+    """Allow named two-company recommendations only when both share one DB industry."""
+    if "비교" not in question:
+        return True
+    pair_match = re.search(r"^\s*(.+?)(?:과|와)\s+(.+?)(?:의|를|을)\s+", question)
+    if not pair_match:
+        return True
+    try:
+        from company_data.financial_store import FinancialStatementStore
+
+        store = FinancialStatementStore()
+        first = store.resolve_company(pair_match.group(1).strip())
+        second = store.resolve_company(pair_match.group(2).strip())
+    except Exception:
+        return True
+    if not first or not second:
+        return True
+    return first.industry_name == second.industry_name
+
+
 def _question_family(question: str) -> str:
     compact = question.replace(" ", "").lower()
     if any(token in compact for token in [
-        "dcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
+        "dcf", "fcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
         "스트레스", "복합충격", "최대샤프", "최소분산", "포트폴리오", "시나리오",
     ]):
         return "advanced"
@@ -356,8 +416,33 @@ def _question_family(question: str) -> str:
     return "financial"
 
 
+def _is_recommendation_question_eligible(question: str) -> bool:
+    """Exclude raw DB industry labels that have not been verified as answerable."""
+    is_industry_prompt = "업종" in question or "산업 대표" in question
+    if not is_industry_prompt:
+        return True
+    return any(
+        question.startswith(f"{industry} ")
+        for industry in CURATED_RECOMMENDATION_INDUSTRIES
+    )
+
+
+def _limit_recommendation_families(questions: list[str]) -> list[str]:
+    """Keep industry prompts scarce while preserving a broad advanced-analysis pool."""
+    limits = {"industry": 15}
+    counts: dict[str, int] = {}
+    selected: list[str] = []
+    for question in questions:
+        family = _question_family(question)
+        if counts.get(family, 0) >= limits.get(family, RECOMMENDED_QUESTION_POOL_SIZE):
+            continue
+        selected.append(question)
+        counts[family] = counts.get(family, 0) + 1
+    return selected
+
+
 def _replacement_question_index(questions: list[str], incoming: str) -> int:
-    family_limits = {"stock": 30, "news": 25, "advanced": 35, "ratio": 45, "industry": 40, "financial": 70}
+    family_limits = {"stock": 30, "news": 25, "advanced": 65, "ratio": 45, "industry": 15, "financial": 70}
     grouped: dict[str, list[int]] = {}
     for index, question in enumerate(questions):
         grouped.setdefault(_question_family(question), []).append(index)
@@ -401,7 +486,7 @@ def log_failed_question(question: str, status: str, error_message: str):
             logger.error(f"Failed to log failed question: {e}")
 
 def _generate_guaranteed_questions() -> list[str]:
-    """Return five diverse questions with stock, news, advanced, and top-company guarantees."""
+    """Return five diverse questions, including two advanced-analysis prompts."""
     global _last_recommended_questions
     _init_questions_file()
     with _file_write_lock:
@@ -428,6 +513,18 @@ def _generate_guaranteed_questions() -> list[str]:
             if not candidates:
                 candidates = [q for q in questions if q not in selected and predicate(q)]
             selected.append(random.choice(candidates) if candidates else fallback)
+
+        second_advanced = [
+            q for q in available
+            if q not in selected and _is_advanced_recommendation_question(q)
+        ]
+        if not second_advanced:
+            second_advanced = [
+                q for q in questions
+                if q not in selected and _is_advanced_recommendation_question(q)
+            ]
+        if second_advanced:
+            selected.append(random.choice(second_advanced))
 
         if not any(_mentions_top_five_company(question) for question in selected):
             top_candidates = [q for q in available if q not in selected and _mentions_top_five_company(q)]
@@ -470,7 +567,7 @@ def _is_stock_recommendation_question(question: str) -> bool:
 def _is_advanced_recommendation_question(question: str) -> bool:
     compact = question.replace(" ", "").lower()
     return any(token in compact for token in [
-        "dcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
+        "dcf", "fcf", "wacc", "영구성장률", "몬테카를로", "기대수익률분포",
         "스트레스", "복합충격", "최대샤프", "최소분산", "포트폴리오",
     ])
 
@@ -579,12 +676,25 @@ def chat(request: ChatRequest) -> StreamingResponse:
 
     def generator():
         while True:
-            item = q.get()
+            try:
+                item = q.get(timeout=10)
+            except queue.Empty:
+                # Prevent free-hosting proxies from closing long-running DART/market-data requests.
+                yield ": keep-alive\n\n"
+                continue
             if item is None:
                 break
             yield item
 
-    return StreamingResponse(generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/failed-question-log")

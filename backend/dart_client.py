@@ -62,7 +62,10 @@ class DartClient:
             normalized_stock_code = re.sub(r"\D", "", stock_code).zfill(6)
             for company in companies:
                 if company.stock_code == normalized_stock_code:
-                    return company
+                    # Some source rows contain stale or duplicated stock codes. When
+                    # a name is also supplied, do not silently resolve another firm.
+                    if not corp_name or _compact(company.corp_name) == _compact(corp_name):
+                        return company
         if corp_name:
             compact_query = _compact(corp_name)
             exact = [company for company in companies if _compact(company.corp_name) == compact_query]
