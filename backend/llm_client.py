@@ -107,6 +107,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_macro_scenario_answer(calculation)
     if calculation.get("mode") == "growth_margin_stress" and calculation.get("status") == "ok":
         return build_growth_margin_stress_answer(calculation)
+    if calculation.get("mode") == "dcf_sensitivity" and calculation.get("status") == "ok":
+        return build_dcf_sensitivity_answer(calculation)
         
     if calculation.get("status") == "latest_news":
         # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
@@ -179,8 +181,8 @@ def build_macro_scenario_answer(calculation: dict) -> str:
     lines = [
         f"{company_name}의 금리·환율 복합 시나리오 분석 결과입니다.",
         "",
-        f"- 기준금리 {rate_shock * 100:.1f}%p 상승 효과: 영업이익 {rate_effect * 100:+.2f}%",
-        f"- 원/달러 환율 {fx_shock * 100:.1f}% 상승 효과: 영업이익 {fx_effect * 100:+.2f}%",
+        f"- 기준금리 {abs(rate_shock) * 100:.1f}%p {'하락' if rate_shock < 0 else '상승'} 효과: 영업이익 {rate_effect * 100:+.2f}%",
+        f"- 원/달러 환율 {abs(fx_shock) * 100:.1f}% {'하락' if fx_shock < 0 else '상승'} 효과: 영업이익 {fx_effect * 100:+.2f}%",
         f"- 복합 효과: 영업이익 {format_money(base_income)} → {format_money(scenario_income)} ({income_change * 100:+.2f}%)",
         f"- WACC 가정: {base_wacc * 100:.2f}% → {scenario_wacc * 100:.2f}%",
         f"- 적정가치 대용 변화율: {value_change * 100:+.2f}%",
@@ -221,6 +223,30 @@ def build_growth_margin_stress_answer(calculation: dict) -> str:
     else:
         lines.append(f"- 가치 대용치 변화: {change*100:+.2f}%")
     lines.extend(["", "과거 재무실적을 기준으로 한 단순 민감도 분석이며 실제 실적이나 목표주가를 의미하지 않습니다."])
+    return "\n".join(lines)
+
+
+def build_dcf_sensitivity_answer(calculation: dict) -> str:
+    company = (calculation.get("company") or {}).get("company_name", "해당 기업")
+    prices = [price for row in calculation.get("sensitivity") or [] for price in row.get("prices") or [] if price is not None]
+    comparison = calculation.get("valuation_comparison")
+    lines = [
+        calculation.get("summary") or f"{company}의 DCF 민감도 분석 결과입니다.",
+        "",
+        f"- 분석 범위: WACC {min(calculation.get('wacc_values') or [0]):.1f}%~{max(calculation.get('wacc_values') or [0]):.1f}%, 영구성장률 {min(calculation.get('growth_values') or [0]):.1f}%~{max(calculation.get('growth_values') or [0]):.1f}%",
+    ]
+    if comparison:
+        lines.extend([
+            f"- 현재 주가: {comparison['current_price']:,.0f}원",
+            f"- 기준 조합: WACC {comparison['wacc']:.1f}%, 영구성장률 {comparison['growth']:.1f}% → 적정가치 {comparison['fair_price']:,.0f}원",
+            f"- 현재가 대비 괴리율: {comparison['upside']*100:+.2f}% → 기준 시나리오상 **{comparison['assessment']}**",
+            f"- 전체 {comparison['total_cells']}개 조합 중 저평가 영역 {comparison['undervalued_cells']}개, 고평가 영역 {comparison['overvalued_cells']}개",
+        ])
+    else:
+        lines.append("- 현재 주가를 확보하지 못해 고평가·저평가 비교는 생략했습니다.")
+    if prices:
+        lines.append(f"- 민감도 적정가치 범위: {min(prices):,.0f}원~{max(prices):,.0f}원")
+    lines.extend(["", "고평가·저평가 판단은 선택한 WACC와 성장률 가정에 따라 달라지는 시나리오 해석이며 투자 의견이 아닙니다."])
     return "\n".join(lines)
 
 
@@ -550,8 +576,8 @@ def build_company_accounts_answer(question: str, calculation: dict) -> str:
     ratio_labels = {
         "cost_of_sales_ratio": "매출원가율",
         "selling_admin_expense_ratio": "판관비율",
-        "operating_margin": "매출액영업이익률",
-        "net_margin": "매출액순이익률",
+        "operating_margin": "영업이익률",
+        "net_margin": "당기순이익률",
         "debt_to_equity": "부채비율",
         "current_ratio": "유동비율",
         "cfo_to_net_income": "영업현금흐름/순이익",

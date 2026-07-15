@@ -38,7 +38,7 @@ PROFITABILITY_RATIO_DEFINITIONS = {
         "required": ["revenue", "cost_of_sales"],
     },
     "gross_margin": {
-        "label": "매출액총이익률",
+        "label": "매출총이익률",
         "required": ["revenue", "gross_profit"],
     },
     "selling_admin_expense_ratio": {
@@ -46,23 +46,23 @@ PROFITABILITY_RATIO_DEFINITIONS = {
         "required": ["revenue", "selling_admin_expenses"],
     },
     "operating_margin": {
-        "label": "매출액영업이익률",
+        "label": "영업이익률",
         "required": ["revenue", "operating_income"],
     },
     "net_margin": {
-        "label": "매출액순이익률",
+        "label": "당기순이익률",
         "required": ["revenue", "net_income"],
     },
     "roa": {
-        "label": "ROA",
+        "label": "총자산이익률",
         "required": ["net_income", "total_assets"],
     },
     "roe": {
-        "label": "ROE",
+        "label": "자기자본이익률",
         "required": ["net_income", "total_equity"],
     },
     "operating_roa": {
-        "label": "총자본영업이익률",
+        "label": "투하자본수익률",
         "required": ["operating_income", "total_assets"],
     },
     "current_ratio": {
@@ -1219,7 +1219,7 @@ def _extract_ratio_accounts(question: str) -> list[str]:
         ratio_keys.append("roa")
     if any(token in compact for token in ["roe", "자기자본이익률", "자기자본순이익률"]):
         ratio_keys.append("roe")
-    if any(token in compact for token in ["총자본영업이익률", "자산영업이익률"]):
+    if any(token in compact for token in ["투하자본수익률", "roic", "총자본영업이익률", "자산영업이익률"]):
         ratio_keys.append("operating_roa")
     if any(token in compact for token in ["유동비율", "currentratio"]):
         ratio_keys.append("current_ratio")

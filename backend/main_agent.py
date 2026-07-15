@@ -525,6 +525,8 @@ def select_tool(question: str) -> str:
             and "매출성장률" in compact
             and "영업이익률" in compact
         )
+        or ("시나리오" in compact and "매출원가율" in compact and "매출" in compact)
+        or ("배당성장률" in compact and "요구수익률" in compact and any(token in compact for token in ["가치", "주가", "시나리오"]))
         or (any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf"]) and any(token in compact for token in ["적정주가", "적정가치", "기업가치", "fcf"]))
     ):
         return "advanced_analysis_tool"
@@ -650,8 +652,13 @@ def select_tool(question: str) -> str:
             "현금전환주기",
             "총자산회전율",
             "매출액총이익률",
+            "매출총이익률",
             "영업이익률",
+            "당기순이익률",
             "순이익률",
+            "자기자본이익률",
+            "총자산이익률",
+            "투하자본수익률",
             "총자본영업이익률",
             "수익성비율",
             "총자산성장률",

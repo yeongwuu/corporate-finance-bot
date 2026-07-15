@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -17,6 +18,8 @@ from tools.valuation_tool import _fetch_listed_shares
 
 def analyze_advanced_question(question: str) -> dict[str, Any]:
     compact = question.replace(" ", "").lower()
+    if "시나리오" in compact and "매출원가율" in compact and "매출" in compact:
+        return _revenue_cost_scenario_analysis(question)
     if any(token in compact for token in ["매출원가", "원가율"]) and any(
         token in compact for token in ["시나리오", "방어확률", "ear", "백테스팅", "몬테카를로", "eps", "주당순이익"]
     ):
@@ -25,6 +28,8 @@ def analyze_advanced_question(question: str) -> dict[str, Any]:
         return _dcf_sensitivity_analysis(question)
     if "스트레스" in compact and "매출성장률" in compact and "영업이익률" in compact:
         return _growth_margin_stress_analysis(question)
+    if "배당성장률" in compact and "요구수익률" in compact and any(token in compact for token in ["가치", "주가", "시나리오"]):
+        return _dividend_growth_scenario_analysis(question)
     if "환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]):
         return _multi_factor_stress_test(question)
     if any(token in compact for token in ["몬테카를로", "기대수익률분포", "유리할확률"]):
@@ -215,6 +220,26 @@ def _dcf_sensitivity_analysis(question: str) -> dict[str, Any]:
         sensitivity.append({"wacc": wacc_pct, "prices": prices})
     valid_prices = [price for row in sensitivity for price in row["prices"] if price is not None]
     company_name = (base.get("company") or {}).get("company_name", "기업")
+    company_data = base.get("company") or {}
+    latest_price = _latest_price(SimpleNamespace(**company_data)) if company_data.get("stock_code") else None
+    middle_wacc = min(wacc_values, key=lambda value: abs(value - (wacc_start + wacc_end) / 2))
+    middle_growth = min(growth_values, key=lambda value: abs(value - (growth_start + growth_end) / 2))
+    middle_row = next(row for row in sensitivity if row["wacc"] == middle_wacc)
+    middle_price = middle_row["prices"][growth_values.index(middle_growth)]
+    comparison = None
+    if latest_price and middle_price is not None:
+        upside = middle_price / latest_price - 1
+        comparison = {
+            "wacc": middle_wacc,
+            "growth": middle_growth,
+            "fair_price": middle_price,
+            "current_price": latest_price,
+            "upside": upside,
+            "assessment": "저평가" if upside > 0 else "고평가" if upside < 0 else "적정 수준",
+            "undervalued_cells": sum(price > latest_price for price in valid_prices),
+            "overvalued_cells": sum(price < latest_price for price in valid_prices),
+            "total_cells": len(valid_prices),
+        }
     return {
         "status": "ok",
         "mode": "dcf_sensitivity",
@@ -223,12 +248,15 @@ def _dcf_sensitivity_analysis(question: str) -> dict[str, Any]:
             f"WACC {wacc_start:.1f}%~{wacc_end:.1f}%, 영구성장률 {growth_start:.1f}%~{growth_end:.1f}%를 1%p 간격으로 적용했습니다.",
             "각 조합에서 10년 명시적 FCF 현재가치와 영구가치를 다시 계산했습니다.",
             f"민감도 범위: 최저 {min(valid_prices):,.0f}원, 최고 {max(valid_prices):,.0f}원",
+            f"현재 주가 {latest_price:,.0f}원 대비 기준 조합(WACC {middle_wacc:.1f}%, 영구성장률 {middle_growth:.1f}%)의 적정가치는 {middle_price:,.0f}원으로 {comparison['assessment']}입니다." if comparison else "현재 주가를 확보하지 못해 고평가·저평가 비교는 생략했습니다.",
             "WACC가 낮고 영구성장률이 높을수록 적정가치가 커지는 가정 기반 분석입니다.",
         ],
         "company": base.get("company"),
         "wacc_values": wacc_values,
         "growth_values": growth_values,
         "sensitivity": sensitivity,
+        "latest_price": latest_price,
+        "valuation_comparison": comparison,
         "external_references": base.get("external_references") or [],
         "dart_fetch": base.get("dart_fetch"),
     }
@@ -246,9 +274,10 @@ def _multi_factor_stress_test(question: str) -> dict[str, Any]:
     rows = store.get_account_series(company.stock_code, ["operating_income", "total_assets", "total_liabilities"], end_year, end_year)
     rows = _fill_missing_series_with_yfinance(company, ["operating_income", "total_assets", "total_liabilities"], rows, None)
     latest = rows[-1] if rows else {}
+    latest = _prefer_dart_latest_accounts(company, end_year, latest, ["operating_income", "total_assets", "total_liabilities"])
     operating_income = _amount(latest, "operating_income")
     if operating_income is None:
-        return {"status": "no_data", "summary": f"{company.company_name}의 기준 영업이익을 확인하지 못했습니다.", "steps": []}
+        return {"status": "no_data", "summary": f"{company.company_name}의 기준 영업이익을 확인하지 못했습니다.", "steps": [], "company": company.__dict__}
     assets, liabilities = _amount(latest, "total_assets"), _amount(latest, "total_liabilities")
     debt_ratio = min(0.8, max(0.1, liabilities / assets)) if assets and liabilities else 0.4
     fx_drop = (_extract_percent(question, "환율") or 10.0) / 100
@@ -258,6 +287,38 @@ def _multi_factor_stress_test(question: str) -> dict[str, Any]:
         "원/달러 환율 하락": -fx_drop * 0.45,
         "기준금리 상승": -rate_rise * (1.6 * debt_ratio),
         "반도체 가격 하락": -chip_price_drop * 0.70,
+    }
+    total_effect = max(-0.8, sum(effects.values()))
+    stressed_income = operating_income * (1 + total_effect)
+    base_wacc = 0.085
+    stressed_wacc = base_wacc + rate_rise * debt_ratio
+    value_change = (1 + total_effect) * base_wacc / stressed_wacc - 1
+    latest_price = _latest_price(company)
+    stressed_price = latest_price * max(0, 1 + value_change) if latest_price else None
+    assumptions = [
+        {"factor": "원/달러 환율 하락", "shock": f"-{fx_drop*100:.1f}%", "income_effect": effects["원/달러 환율 하락"]},
+        {"factor": "기준금리 상승", "shock": f"+{rate_rise*100:.1f}%p", "income_effect": effects["기준금리 상승"]},
+        {"factor": "반도체 가격 하락", "shock": f"-{chip_price_drop*100:.1f}%", "income_effect": effects["반도체 가격 하락"]},
+    ]
+    return {
+        "status": "ok",
+        "mode": "multi_factor_stress",
+        "summary": f"복합 스트레스 시 {company.company_name}의 영업이익은 {abs(total_effect)*100:.2f}%, 적정가치 대용치는 {abs(value_change)*100:.2f}% 하락하는 것으로 추정됩니다.",
+        "steps": [
+            f"기본 충격 가정: 환율 -{fx_drop*100:.1f}%, 기준금리 +{rate_rise*100:.1f}%p, 반도체 가격 -{chip_price_drop*100:.1f}%",
+            *[f"{row['factor']} {row['shock']}: 영업이익 영향 {row['income_effect']*100:+.2f}%" for row in assumptions],
+            f"기준 영업이익 {_money(operating_income)} → 스트레스 영업이익 {_money(stressed_income)}",
+            f"WACC {base_wacc*100:.2f}% → {stressed_wacc*100:.2f}%, 적정가치 변화 {value_change*100:+.2f}%",
+            f"현재가 기준 스트레스 주가 {stressed_price:,.0f}원" if stressed_price else "현재 주가를 확보하지 못해 가치 변화율만 제시했습니다.",
+            "충격별 탄력도를 합산한 시나리오 분석이며 실제 손익의 인과 예측은 아닙니다.",
+        ],
+        "company": company.__dict__,
+        "base_operating_income": operating_income,
+        "scenario_operating_income": stressed_income,
+        "value_change": value_change,
+        "latest_price": latest_price,
+        "scenario_price": stressed_price,
+        "stress_factors": assumptions,
     }
 
 
@@ -332,40 +393,86 @@ def _growth_margin_stress_analysis(question: str) -> dict[str, Any]:
             "stressed_margin": stressed_margin,
         },
     }
-    total_effect = max(-0.8, sum(effects.values()))
-    stressed_income = operating_income * (1 + total_effect)
-    base_wacc = 0.085
-    stressed_wacc = base_wacc + rate_rise * debt_ratio
-    value_change = (1 + total_effect) * base_wacc / stressed_wacc - 1
+
+
+def _revenue_cost_scenario_analysis(question: str) -> dict[str, Any]:
+    store = FinancialStatementStore()
+    company = _resolve_company(store, question)
+    if not company:
+        return {"status": "needs_company", "summary": "매출·원가 시나리오 대상 기업명을 확인하지 못했습니다.", "steps": []}
+    years = store.available_years(company.stock_code)
+    if not years:
+        return {"status": "no_data", "summary": f"{company.company_name}의 재무 데이터를 찾지 못했습니다.", "steps": [], "company": company.__dict__}
+    end_year = max(years)
+    rows = store.get_account_series(company.stock_code, ["revenue", "cost_of_sales", "operating_income"], end_year, end_year)
+    latest = rows[-1] if rows else {}
+    latest = _prefer_dart_latest_accounts(company, end_year, latest, ["revenue", "cost_of_sales", "operating_income"])
+    revenue = _amount(latest, "revenue")
+    cost = _amount(latest, "cost_of_sales")
+    operating_income = _amount(latest, "operating_income")
+    if revenue in (None, 0) or cost is None or operating_income is None:
+        return {"status": "no_data", "summary": f"{company.company_name}의 매출액·매출원가·영업이익을 모두 확인하지 못했습니다.", "steps": [], "company": company.__dict__}
+    revenue_change = (_extract_directional_percent(question, "매출") or -5.0) / 100
+    cost_ratio_change = (_extract_directional_percent(question, "매출원가율") or 2.0) / 100
+    base_cost_ratio = cost / revenue
+    fixed_sga = revenue - cost - operating_income
+    scenario_revenue = revenue * (1 + revenue_change)
+    scenario_cost_ratio = base_cost_ratio + cost_ratio_change
+    scenario_income = scenario_revenue * (1 - scenario_cost_ratio) - fixed_sga
+    income_change = (scenario_income - operating_income) / abs(operating_income) if operating_income else 0.0
     latest_price = _latest_price(company)
-    stressed_price = latest_price * max(0, 1 + value_change) if latest_price else None
-    assumptions = [
-        {"factor": "원/달러 환율 하락", "shock": f"-{fx_drop*100:.1f}%", "income_effect": effects["원/달러 환율 하락"]},
-        {"factor": "기준금리 상승", "shock": f"+{rate_rise*100:.1f}%p", "income_effect": effects["기준금리 상승"]},
-        {"factor": "반도체 가격 하락", "shock": f"-{chip_price_drop*100:.1f}%", "income_effect": effects["반도체 가격 하락"]},
-    ]
+    scenario_price = latest_price * max(0, 1 + income_change) if latest_price else None
     return {
         "status": "ok",
-        "mode": "multi_factor_stress",
-        "summary": f"복합 스트레스 시 {company.company_name}의 영업이익은 {abs(total_effect)*100:.2f}%, 적정가치 대용치는 {abs(value_change)*100:.2f}% 하락하는 것으로 추정됩니다.",
+        "mode": "revenue_cost_scenario",
+        "summary": f"매출 {revenue_change*100:+.1f}%, 매출원가율 {cost_ratio_change*100:+.1f}%p 시 {company.company_name}의 영업이익은 기준 대비 {income_change*100:+.2f}% 변하는 것으로 추정됩니다.",
         "steps": [
-            f"기본 충격 가정: 환율 -{fx_drop*100:.1f}%, 기준금리 +{rate_rise*100:.1f}%p, 반도체 가격 -{chip_price_drop*100:.1f}%",
-            *[f"{row['factor']} {row['shock']}: 영업이익 영향 {row['income_effect']*100:+.2f}%" for row in assumptions],
-            f"기준 영업이익 {_money(operating_income)} → 스트레스 영업이익 {_money(stressed_income)}",
-            f"WACC {base_wacc*100:.2f}% → {stressed_wacc*100:.2f}%, 적정가치 변화 {value_change*100:+.2f}%",
-            f"현재가 기준 스트레스 주가 {stressed_price:,.0f}원" if stressed_price else "현재 주가를 확보하지 못해 가치 변화율만 제시했습니다.",
-            "충격별 탄력도를 합산한 시나리오 분석이며 실제 손익의 인과 예측은 아닙니다.",
+            f"기준: {end_year}년 매출액 {_money(revenue)}, 매출원가율 {base_cost_ratio*100:.2f}%, 영업이익 {_money(operating_income)}",
+            f"시나리오: 매출액 {_money(scenario_revenue)}, 매출원가율 {scenario_cost_ratio*100:.2f}%",
+            f"판매비와관리비 {_money(fixed_sga)} 고정 가정 시 영업이익 {_money(scenario_income)} ({income_change*100:+.2f}%)",
+            f"현재가 기준 가치 대용치 {latest_price:,.0f}원 → {scenario_price:,.0f}원" if scenario_price else f"가치 대용치 변화 {income_change*100:+.2f}%",
+            "매출원가율 외 판매비와관리비 등은 고정한 단순 민감도 분석입니다.",
         ],
         "company": company.__dict__,
         "base_operating_income": operating_income,
-        "scenario_operating_income": stressed_income,
-        "value_change": value_change,
+        "scenario_operating_income": scenario_income,
         "latest_price": latest_price,
-        "scenario_price": stressed_price,
-        "stress_factors": assumptions,
+        "scenario_price": scenario_price,
+        "value_change": income_change,
+        "assumptions": {"revenue_change": revenue_change, "base_cost_ratio": base_cost_ratio, "cost_ratio_change": cost_ratio_change},
     }
 
 
+def _dividend_growth_scenario_analysis(question: str) -> dict[str, Any]:
+    dividend_match = re.search(r"주당\s*배당금[^0-9]{0,10}([0-9][0-9,]*)\s*원", question)
+    growth_values = [float(value) for value in re.findall(r"([0-9]+(?:\.[0-9]+)?)\s*%", question)]
+    required_match = re.search(r"요구수익률[^0-9]{0,10}([0-9]+(?:\.[0-9]+)?)\s*%", question)
+    if not dividend_match or not required_match or len(growth_values) < 3:
+        return {"status": "need_more_data", "summary": "배당가치 시나리오에는 주당 배당금, 기존·변경 배당성장률, 요구수익률이 필요합니다.", "steps": []}
+    dividend = float(dividend_match.group(1).replace(",", ""))
+    required_return = float(required_match.group(1)) / 100
+    growth_candidates = [value / 100 for value in growth_values if value / 100 != required_return]
+    base_growth, scenario_growth = growth_candidates[0], growth_candidates[1]
+    if required_return <= max(base_growth, scenario_growth):
+        return {"status": "no_data", "summary": "항상성장 배당모형에서는 요구수익률이 배당성장률보다 커야 합니다.", "steps": []}
+    base_value = dividend * (1 + base_growth) / (required_return - base_growth)
+    scenario_value = dividend * (1 + scenario_growth) / (required_return - scenario_growth)
+    value_change = scenario_value / base_value - 1
+    return {
+        "status": "ok",
+        "mode": "dividend_growth_scenario",
+        "summary": f"배당성장률이 {base_growth*100:.1f}%에서 {scenario_growth*100:.1f}%로 변하면 배당할인모형 주식가치는 {base_value:,.0f}원에서 {scenario_value:,.0f}원으로 {value_change*100:+.2f}% 변합니다.",
+        "steps": [
+            f"가정: 주당 배당금 {dividend:,.0f}원, 요구수익률 {required_return*100:.1f}%",
+            f"기준 가치 = {dividend:,.0f}×(1+{base_growth*100:.1f}%)/({required_return*100:.1f}%-{base_growth*100:.1f}%) = {base_value:,.0f}원",
+            f"변경 가치 = {dividend:,.0f}×(1+{scenario_growth*100:.1f}%)/({required_return*100:.1f}%-{scenario_growth*100:.1f}%) = {scenario_value:,.0f}원",
+            "배당이 영구히 일정한 성장률로 증가한다는 가정의 이론값입니다.",
+        ],
+        "base_value": base_value,
+        "scenario_value": scenario_value,
+        "value_change": value_change,
+        "assumptions": {"dividend": dividend, "required_return": required_return, "base_growth": base_growth, "scenario_growth": scenario_growth},
+    }
 def _ten_year_dcf(question: str, fetch_notes: bool = True) -> dict[str, Any]:
     store = FinancialStatementStore()
     company = _resolve_company(store, question)
@@ -515,13 +622,14 @@ def _macro_scenario_analysis(question: str) -> dict[str, Any]:
     company = _resolve_company(store, question)
     if not company:
         return {"status": "needs_company", "summary": "시나리오를 분석할 기업명을 확인하지 못했습니다.", "steps": []}
-    rate_shock = (_extract_percent(question, "기준금리") or 1.0) / 100
-    fx_shock = (_extract_percent(question, "환율") or 10.0) / 100
+    rate_shock = (_extract_directional_percent(question, "기준금리") or 1.0) / 100
+    fx_shock = (_extract_directional_percent(question, "환율") or 10.0) / 100
     years = store.available_years(company.stock_code)
     end_year = max(years)
     rows = store.get_account_series(company.stock_code, ["operating_income", "total_assets", "total_liabilities"], end_year, end_year)
     rows = _fill_missing_series_with_yfinance(company, ["operating_income", "total_assets", "total_liabilities"], rows, None)
     latest = rows[-1] if rows else {}
+    latest = _prefer_dart_latest_accounts(company, end_year, latest, ["operating_income", "total_assets", "total_liabilities"])
     operating_income = _amount(latest, "operating_income")
     assets = _amount(latest, "total_assets")
     liabilities = _amount(latest, "total_liabilities")
@@ -542,8 +650,8 @@ def _macro_scenario_analysis(question: str) -> dict[str, Any]:
     scenario_price = latest_price * (1 + value_change) if latest_price else None
     steps = [
         f"기준: {end_year}년 영업이익 {_money(operating_income)}, 부채 민감도 {debt_ratio:.2f}",
-        f"환율 {fx_shock*100:.1f}% 상승 효과: 영업이익 {fx_effect*100:+.2f}% (수출 업종 탄력도 {fx_elasticity:.2f})",
-        f"기준금리 {rate_shock*100:.1f}%p 상승 효과: 영업이익 {rate_effect*100:+.2f}% (금리 탄력도 {rate_elasticity:.2f})",
+        f"환율 {abs(fx_shock)*100:.1f}% {'하락' if fx_shock < 0 else '상승'} 효과: 영업이익 {fx_effect*100:+.2f}% (수출 업종 탄력도 {fx_elasticity:.2f})",
+        f"기준금리 {abs(rate_shock)*100:.1f}%p {'하락' if rate_shock < 0 else '상승'} 효과: 영업이익 {rate_effect*100:+.2f}% (금리 탄력도 {rate_elasticity:.2f})",
         f"복합 시나리오 영업이익: {_money(scenario_income)} ({total_effect*100:+.2f}%)",
         f"WACC {base_wacc*100:.2f}% → {scenario_wacc*100:.2f}%, 가치 변화 추정 {value_change*100:+.2f}%",
         f"현재가 기준 시나리오 주가: {scenario_price:,.0f}원" if scenario_price else "현재 주가를 확보하지 못해 시나리오 주가는 비율로만 제시했습니다.",
@@ -648,6 +756,38 @@ def _prefer_dart_revenue_income_series(company: Any, fiscal_year: int, fallback:
         return fallback
 
 
+def _prefer_dart_latest_accounts(
+    company: Any,
+    fiscal_year: int,
+    fallback: dict[str, Any],
+    account_keys: list[str],
+) -> dict[str, Any]:
+    """Fill the latest scenario inputs from consolidated DART accounts without exposing missing-row errors."""
+    if not load_dart_api_key():
+        return fallback or {"year": fiscal_year}
+    try:
+        client = DartClient()
+        for fs_div in ("CFS", "OFS"):
+            result = client.fetch_financial_accounts(
+                stock_code=company.stock_code,
+                corp_name=company.company_name,
+                fiscal_year=fiscal_year,
+                fs_div=fs_div,
+            )
+            if result.get("status") != "ok":
+                continue
+            mapped = _map_dart_accounts(result.get("accounts") or [])
+            row = {**(fallback or {}), "year": fiscal_year}
+            for key in account_keys:
+                account = mapped.get(key)
+                if account and account.get("amount") is not None:
+                    row[key] = account
+            return row
+    except Exception:
+        pass
+    return fallback or {"year": fiscal_year}
+
+
 def _amount(row: dict[str, Any], key: str) -> float | None:
     item = row.get(key) if row else None
     return float(item["amount"]) if isinstance(item, dict) and item.get("amount") is not None else None
@@ -662,6 +802,15 @@ def _cagr(values: list[float]) -> float | None:
 def _extract_percent(question: str, label: str) -> float | None:
     match = re.search(rf"{label}[^0-9]{{0,12}}([0-9]+(?:\.[0-9]+)?)\s*%?p?", question)
     return float(match.group(1)) if match else None
+
+
+def _extract_directional_percent(question: str, label: str) -> float | None:
+    match = re.search(rf"{label}[^0-9]{{0,12}}([0-9]+(?:\.[0-9]+)?)\s*%?p?([^,.?]{{0,12}})", question)
+    if not match:
+        return None
+    value = float(match.group(1))
+    direction = match.group(2)
+    return -value if any(token in direction for token in ["하락", "인하", "내리", "감소", "떨어"]) else value
 
 
 def _extract_range(question: str, label: str, default: tuple[float, float]) -> tuple[float, float]:

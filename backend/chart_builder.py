@@ -20,7 +20,7 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
-    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "growth_margin_stress", "multi_factor_stress", "cost_of_sales_ear"}:
+    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "growth_margin_stress", "revenue_cost_scenario", "dividend_growth_scenario", "multi_factor_stress", "cost_of_sales_ear"}:
         return _build_advanced_analysis_chart(calculation)
     if calculation.get("mode") == "stock_price_comparison":
         return _build_stock_price_comparison_chart(calculation)
@@ -643,6 +643,15 @@ def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any
         base = float(calculation.get("base_operating_income") or 0)
         scenario = float(calculation.get("scenario_operating_income") or 0)
         return {"type": "bar", "title": f"{company.get('company_name', '기업')} 매출·수익성 스트레스", "subtitle": "기준 대비 성장률·영업이익률 동시 하락", "unit": "KRW", "bars": [{"key": "base", "label": "기준 영업이익", "value": base, "display": _format_amount(base), "color": "#FEA278"}, {"key": "stress", "label": "스트레스 영업이익", "value": scenario, "display": _format_amount(scenario), "color": "#FF530A"}]}
+    if mode == "revenue_cost_scenario":
+        company = calculation.get("company") or {}
+        base = float(calculation.get("base_operating_income") or 0)
+        scenario = float(calculation.get("scenario_operating_income") or 0)
+        return {"type": "bar", "title": f"{company.get('company_name', '기업')} 매출·원가 시나리오", "subtitle": "매출 변화와 매출원가율 변화 동시 반영", "unit": "KRW", "bars": [{"key": "base", "label": "기준 영업이익", "value": base, "display": _format_amount(base), "color": "#FEA278"}, {"key": "scenario", "label": "변경 영업이익", "value": scenario, "display": _format_amount(scenario), "color": "#FF530A"}]}
+    if mode == "dividend_growth_scenario":
+        base = float(calculation.get("base_value") or 0)
+        scenario = float(calculation.get("scenario_value") or 0)
+        return {"type": "bar", "title": "배당성장률 변화에 따른 주식가치", "subtitle": "항상성장 배당할인모형", "unit": "KRW_PRICE", "bars": [{"key": "base", "label": "기준 성장률", "value": base, "display": f"{base:,.0f}원", "color": "#FEA278"}, {"key": "scenario", "label": "변경 성장률", "value": scenario, "display": f"{scenario:,.0f}원", "color": "#FF530A"}]}
     if mode == "multi_factor_stress":
         company = calculation.get("company") or {}
         base = float(calculation.get("base_operating_income") or 0)

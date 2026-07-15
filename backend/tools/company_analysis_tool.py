@@ -32,7 +32,7 @@ MAJOR_ACCOUNT_ORDER = [
 RATIO_LABELS = {
     "revenue_growth": "매출 성장률",
     "operating_margin": "영업이익률",
-    "net_margin": "순이익률",
+    "net_margin": "당기순이익률",
     "debt_to_equity": "부채비율",
     "current_ratio": "유동비율",
     "cfo_to_net_income": "영업현금흐름/순이익",

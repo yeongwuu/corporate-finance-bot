@@ -52,10 +52,10 @@ def calculate_growth_policy(question: str) -> dict:
         f"기말 자기자본 = 기초 자기자본 + 순이익 * 유보율 = {format_money(ending_equity)}",
         f"기말 부채 = 기말 자기자본 * 부채비율 = {format_money(ending_debt)}",
         f"기말 총자산 = {format_money(ending_assets)}",
-        f"ROA = 순이익 / 평균총자산 = {format_percent(roa)}",
-        f"ROE = 순이익 / 평균자기자본 = {format_percent(roe)}",
+        f"총자산이익률 = 순이익 / 평균총자산 = {format_percent(roa)}",
+        f"자기자본이익률 = 순이익 / 평균자기자본 = {format_percent(roe)}",
     ]
-    summary_parts = [f"ROA는 {format_percent(roa)}", f"ROE는 {format_percent(roe)}"]
+    summary_parts = [f"총자산이익률은 {format_percent(roa)}", f"자기자본이익률은 {format_percent(roe)}"]
 
     if "20%" in question and ("내부자금" in question or "차입" in question):
         next_income = current_net_income * Decimal("1.2")
@@ -171,41 +171,41 @@ def add_profitability_ratios(question: str, ratios: list[str], steps: list[str])
 
     if gross_profit is not None and sales:
         gross_margin = gross_profit / sales * Decimal("100")
-        ratios.append(f"매출액총이익률 {format_percent(gross_margin)}")
-        steps.append(f"매출액총이익률 = 매출총이익 / 매출액 * 100 = {format_percent(gross_margin)}")
+        ratios.append(f"매출총이익률 {format_percent(gross_margin)}")
+        steps.append(f"매출총이익률 = 매출총이익 / 매출액 * 100 = {format_percent(gross_margin)}")
 
     if operating_income is not None and sales:
         operating_margin = operating_income / sales * Decimal("100")
-        ratios.append(f"매출액영업이익률 {format_percent(operating_margin)}")
-        steps.append(f"매출액영업이익률 = 영업이익 / 매출액 * 100 = {format_percent(operating_margin)}")
+        ratios.append(f"영업이익률 {format_percent(operating_margin)}")
+        steps.append(f"영업이익률 = 영업이익 / 매출액 * 100 = {format_percent(operating_margin)}")
 
     if net_income is not None and sales:
         net_margin = net_income / sales * Decimal("100")
-        ratios.append(f"매출액순이익률 {format_percent(net_margin)}")
-        steps.append(f"매출액순이익률 = 당기순이익 / 매출액 * 100 = {format_percent(net_margin)}")
+        ratios.append(f"당기순이익률 {format_percent(net_margin)}")
+        steps.append(f"당기순이익률 = 당기순이익 / 매출액 * 100 = {format_percent(net_margin)}")
 
     if net_income is not None and equity:
         roe = net_income / equity * Decimal("100")
-        ratios.append(f"ROE {format_percent(roe)}")
-        steps.append(f"ROE = 당기순이익 / 자기자본 * 100 = {format_percent(roe)}")
+        ratios.append(f"자기자본이익률 {format_percent(roe)}")
+        steps.append(f"자기자본이익률 = 당기순이익 / 자기자본 * 100 = {format_percent(roe)}")
 
     if net_income is not None and total_assets:
         roa = net_income / total_assets * Decimal("100")
-        ratios.append(f"ROA {format_percent(roa)}")
-        steps.append(f"ROA = 당기순이익 / 총자본 또는 총자산 * 100 = {format_percent(roa)}")
+        ratios.append(f"총자산이익률 {format_percent(roa)}")
+        steps.append(f"총자산이익률 = 당기순이익 / 총자산 * 100 = {format_percent(roa)}")
 
     if operating_income is not None and total_assets:
         operating_roa = operating_income / total_assets * Decimal("100")
-        ratios.append(f"총자본영업이익률 {format_percent(operating_roa)}")
-        steps.append(f"총자본영업이익률 = 영업이익 / 총자본 * 100 = {format_percent(operating_roa)}")
+        ratios.append(f"투하자본수익률 {format_percent(operating_roa)}")
+        steps.append(f"투하자본수익률 = 영업이익 / 총자본 * 100 = {format_percent(operating_roa)}")
 
     if net_income is not None and sales and total_assets and debt is not None and equity:
         net_margin = net_income / sales
         total_asset_turnover = sales / total_assets
         debt_ratio = debt / equity
         dupont_roe = net_margin * total_asset_turnover * (Decimal("1") + debt_ratio) * Decimal("100")
-        ratios.append(f"듀퐁 ROE {format_percent(dupont_roe)}")
-        steps.append("듀퐁 ROE = 매출액순이익률 * 총자산회전율 * (1 + 부채비율) = " + format_percent(dupont_roe))
+        ratios.append(f"듀퐁 자기자본이익률 {format_percent(dupont_roe)}")
+        steps.append("듀퐁 자기자본이익률 = 당기순이익률 * 총자산회전율 * (1 + 부채비율) = " + format_percent(dupont_roe))
 
 
 def add_activity_ratios(question: str, ratios: list[str], steps: list[str]) -> None:

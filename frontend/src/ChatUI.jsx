@@ -445,7 +445,7 @@ export default function ChatUI() {
           {!isInitialState && <p className="eyebrow">Corporate Finance Bot</p>}
         </div>
         <p className="analysis-disclaimer">
-          분석 결과는 가정과 과거 데이터를 기반으로 한 단순 추정치이며, 실제 결과와 다를 수 있습니다.
+          분석 결과는 과거 데이터와 가정을 기반으로 한 단순 추정치이며, 실제 결과와 다를 수 있습니다.
         </p>
       </aside>
 
@@ -1263,7 +1263,7 @@ function normalizeQuestionForComparison(question) {
 function isFinancialConceptQuestion(question) {
   const normalized = String(question || "").toLowerCase();
   const conceptTerms = ["무엇", "뭐", "필요한", "계정", "계산 방법", "공식", "산식", "차이", "의미", "정의"];
-  const financialTerms = ["영업이익", "매출총이익", "당기순이익", "매출액", "영업이익률", "순이익률"];
+  const financialTerms = ["영업이익", "매출총이익", "당기순이익", "매출액", "매출총이익률", "영업이익률", "당기순이익률", "자기자본이익률", "총자산이익률", "투하자본수익률"];
   return conceptTerms.some((term) => normalized.includes(term)) && financialTerms.some((term) => normalized.includes(term));
 }
 
@@ -1293,8 +1293,12 @@ function extractCompanies(question) {
 function extractMetric(question) {
   const compact = question.replace(/\s+/g, "").toLowerCase();
   const rules = [
-    ["매출액영업이익률", ["매출액영업이익률", "영업이익률", "영업마진"]],
-    ["매출액순이익률", ["매출액순이익률", "순이익률", "순이익마진"]],
+    ["매출총이익률", ["매출액총이익률", "매출총이익률", "매출총이익마진"]],
+    ["영업이익률", ["매출액영업이익률", "영업이익률", "영업마진"]],
+    ["당기순이익률", ["매출액순이익률", "당기순이익률", "순이익률", "순이익마진"]],
+    ["자기자본이익률", ["자기자본이익률", "roe"]],
+    ["총자산이익률", ["총자산이익률", "roa"]],
+    ["투하자본수익률", ["투하자본수익률", "roic", "총자본영업이익률"]],
     ["매출액이익률", ["매출이익률", "매출액이익률", "이익률"]],
     ["매출원가율", ["매출원가율", "원가율"]],
     ["판관비율", ["판관비율", "판매관리비율", "판매비와관리비율"]],
