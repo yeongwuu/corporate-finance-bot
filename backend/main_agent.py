@@ -4,7 +4,7 @@ from typing import Callable
 
 from chart_builder import build_chart_spec
 from korean_particles import normalize_company_pair_particles
-from llm_client import build_attachment_answer, build_final_answer
+from llm_client import append_concept_example, build_attachment_answer, build_final_answer
 from rag.simple_rag import search_knowledge
 from tools.capital_budgeting_tool import analyze_capital_budgeting
 from tools.company_analysis_tool import analyze_company_financials
@@ -87,6 +87,7 @@ def answer_finance_question(
         calculation=calculation,
         references=references,
     )
+    answer = append_concept_example(question, answer)
     trace.append(_trace_item("답변 생성", "계산 결과와 근거를 사용자 답변 문장으로 정리했습니다.", step_started))
 
     step_started = time.perf_counter()
@@ -519,6 +520,11 @@ def select_tool(question: str) -> str:
         or ("wacc" in compact and "영구성장률" in compact and "민감도" in compact)
         or ("환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]))
         or ("기준금리" in compact and "환율" in compact)
+        or (
+            "스트레스" in compact
+            and "매출성장률" in compact
+            and "영업이익률" in compact
+        )
         or (any(token in compact for token in ["dcf", "현금흐름할인", "10년fcf"]) and any(token in compact for token in ["적정주가", "적정가치", "기업가치", "fcf"]))
     ):
         return "advanced_analysis_tool"

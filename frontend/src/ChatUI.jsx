@@ -444,6 +444,9 @@ export default function ChatUI() {
         <div>
           {!isInitialState && <p className="eyebrow">Corporate Finance Bot</p>}
         </div>
+        <p className="analysis-disclaimer">
+          분석 결과는 가정과 과거 데이터를 기반으로 한 단순 추정치이며, 실제 결과와 다를 수 있습니다.
+        </p>
       </aside>
 
       {isInitialState ? (
@@ -524,8 +527,8 @@ export default function ChatUI() {
                 <button
                   type="button"
                   className="capsule-attach-btn"
-                  data-tooltip="문제를 업로드하세요."
-                  title="문제를 업로드하세요."
+                  data-tooltip="문제 업로드"
+                  aria-label="문제 업로드"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
                   style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
@@ -538,7 +541,7 @@ export default function ChatUI() {
                   type="submit"
                   className="capsule-send-btn"
                   disabled={!canSubmit}
-                  data-tooltip="질문을 전송합니다."
+                  data-tooltip="질문 전송"
                   aria-label="질문 전송"
                   style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', width: '28px', height: '28px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: canSubmit ? 'var(--accent)' : 'var(--border)' }}
                 >
@@ -629,8 +632,8 @@ export default function ChatUI() {
           <button
             type="button"
             className="attach-button"
-            data-tooltip="문제를 업로드하세요."
-            title="문제를 업로드하세요."
+            data-tooltip="문제 업로드"
+            aria-label="문제 업로드"
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
             style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', alignSelf: 'end' }}
@@ -644,8 +647,8 @@ export default function ChatUI() {
             className={isLoading ? "send-button cancel-button" : "send-button"}
             disabled={!isLoading && !canSubmit}
             onClick={isLoading ? cancelMessage : undefined}
-            data-tooltip={isLoading ? "응답 생성을 취소합니다." : "질문을 전송합니다."}
-            aria-label={isLoading ? "응답 생성 취소" : "질문 전송"}
+            data-tooltip={isLoading ? "질문 취소" : "질문 전송"}
+            aria-label={isLoading ? "질문 취소" : "질문 전송"}
             style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '9px', width: '44px', height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: isLoading ? '#e98787' : (canSubmit ? '#d99572' : '#d8ccc4'), alignSelf: 'end' }}
           >
             {isLoading ? (
@@ -854,7 +857,7 @@ function MessageText({ message, onAskSuggestion }) {
             className="message-action-btn"
             onClick={copyMessage}
             aria-label="답변 복사"
-            data-tooltip={copied ? "복사했습니다" : "답변을 복사합니다"}
+            data-tooltip={copied ? "복사 완료" : "답변 복사"}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -866,7 +869,7 @@ function MessageText({ message, onAskSuggestion }) {
             className={`message-action-btn${shared ? " active" : ""}`}
             onClick={shareQuestionAndAnswer}
             aria-label="질문과 답변 공유"
-            data-tooltip={shared ? "공유했습니다" : "질문과 답변을 공유합니다"}
+            data-tooltip={shared ? "공유 완료" : "답변 공유"}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="18" cy="5" r="3" />

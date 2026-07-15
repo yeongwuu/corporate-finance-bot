@@ -282,7 +282,8 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         steps.append("재무제표 패턴을 중심으로 해석했습니다.")
 
     if ratio_series:
-        summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 수익성 비율 추이를 분석했습니다."
+        ratio_group = _ratio_group_label(ratio_keys)
+        summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 {ratio_group} 추이를 분석했습니다."
     else:
         summary = f"{company.company_name}의 {period.start_year}~{period.end_year}년 추이를 분석했습니다."
     if news_requested and not documents:
@@ -303,6 +304,19 @@ def analyze_company_trend(question: str) -> dict[str, Any]:
         "dart_fetch": dart_fetch_result,
         "news_fetch": news_fetch_result,
     }
+
+
+def _ratio_group_label(ratio_keys: list[str]) -> str:
+    liquidity = {"current_ratio", "quick_ratio", "cash_ratio"}
+    stability = {"debt_ratio", "equity_ratio", "interest_coverage_ratio"}
+    keys = set(ratio_keys)
+    if keys & liquidity and keys & stability:
+        return "유동성·안정성 비율"
+    if keys & liquidity:
+        return "유동성 비율"
+    if keys & stability:
+        return "안정성 비율"
+    return "수익성 비율"
 
 
 def _extract_period(question: str, available_years: list[int]) -> Period:

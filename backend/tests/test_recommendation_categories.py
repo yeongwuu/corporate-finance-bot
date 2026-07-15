@@ -25,6 +25,13 @@ class RecommendationCategoryTest(unittest.TestCase):
         ]
         self.assertEqual(len(valuation_questions), 25)
 
+    def test_advanced_questions_use_explicit_numbers_and_supported_routes(self):
+        unsupported = ["향후 10년 FCF", "CapEx와 운전자본"]
+        for question in server.VALUATION_STRESS_QUESTION_SEEDS:
+            self.assertFalse(any(token in question for token in unsupported), question)
+            self.assertRegex(question, r"\d")
+            self.assertEqual(server._question_family(question), "valuation_stress")
+
 
 if __name__ == "__main__":
     unittest.main()

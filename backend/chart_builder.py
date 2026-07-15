@@ -20,7 +20,7 @@ CHART_ACCOUNT_ORDER = [
 def build_chart_spec(tool_name: str, calculation: dict[str, Any]) -> dict[str, Any] | None:
     if calculation.get("status") != "ok":
         return None
-    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "multi_factor_stress", "cost_of_sales_ear"}:
+    if calculation.get("mode") in {"advanced_dcf", "dcf_sensitivity", "monte_carlo_comparison", "macro_scenario", "growth_margin_stress", "multi_factor_stress", "cost_of_sales_ear"}:
         return _build_advanced_analysis_chart(calculation)
     if calculation.get("mode") == "stock_price_comparison":
         return _build_stock_price_comparison_chart(calculation)
@@ -195,21 +195,35 @@ def _build_ratio_trend_chart(calculation: dict[str, Any]) -> dict[str, Any] | No
 
     company = calculation.get("company") or {}
     period = calculation.get("period") or {}
+    ratio_title = _ratio_group_title(ratio_keys)
     if _should_use_compact_bar(datasets):
         return {
             "type": "compact_metric_bar",
-            "title": f"{company.get('company_name', '기업')} 수익성 비율 비교",
+            "title": f"{company.get('company_name', '기업')} {ratio_title} 비교",
             "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
             "unit": "PERCENT",
             "metrics": _datasets_to_bar_metrics(datasets),
         }
     return {
         "type": "line",
-        "title": f"{company.get('company_name', '기업')} 수익성 비율 추이",
+        "title": f"{company.get('company_name', '기업')} {ratio_title} 추이",
         "subtitle": f"{period.get('start_year', '')}~{period.get('end_year', '')}년",
         "unit": "PERCENT",
         "datasets": datasets,
     }
+
+
+def _ratio_group_title(ratio_keys: list[str]) -> str:
+    liquidity = {"current_ratio", "quick_ratio", "cash_ratio"}
+    stability = {"debt_ratio", "equity_ratio", "interest_coverage_ratio"}
+    keys = set(ratio_keys)
+    if keys & liquidity and keys & stability:
+        return "유동성·안정성 비율"
+    if keys & liquidity:
+        return "유동성 비율"
+    if keys & stability:
+        return "안정성 비율"
+    return "수익성 비율"
 
 
 def _should_use_compact_bar(datasets: list[dict[str, Any]]) -> bool:
@@ -624,6 +638,11 @@ def _build_advanced_analysis_chart(calculation: dict[str, Any]) -> dict[str, Any
         base = float(calculation.get("base_operating_income") or 0)
         scenario = float(calculation.get("scenario_operating_income") or 0)
         return {"type": "bar", "title": f"{company.get('company_name', '기업')} 영업이익 시나리오", "subtitle": "기준 대비 금리·환율 복합 충격", "unit": "KRW", "bars": [{"key": "base", "label": "기준", "value": base, "display": _format_amount(base), "color": "#FEA278"}, {"key": "scenario", "label": "충격 후", "value": scenario, "display": _format_amount(scenario), "color": "#FF530A"}]}
+    if mode == "growth_margin_stress":
+        company = calculation.get("company") or {}
+        base = float(calculation.get("base_operating_income") or 0)
+        scenario = float(calculation.get("scenario_operating_income") or 0)
+        return {"type": "bar", "title": f"{company.get('company_name', '기업')} 매출·수익성 스트레스", "subtitle": "기준 대비 성장률·영업이익률 동시 하락", "unit": "KRW", "bars": [{"key": "base", "label": "기준 영업이익", "value": base, "display": _format_amount(base), "color": "#FEA278"}, {"key": "stress", "label": "스트레스 영업이익", "value": scenario, "display": _format_amount(scenario), "color": "#FF530A"}]}
     if mode == "multi_factor_stress":
         company = calculation.get("company") or {}
         base = float(calculation.get("base_operating_income") or 0)

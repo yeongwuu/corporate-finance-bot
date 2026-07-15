@@ -20,6 +20,29 @@ UNSUPPORTED_COMPANY_MESSAGE = (
 )
 
 
+def append_concept_example(question: str, answer: str) -> str:
+    """Append a short numerical example only when a supported theory concept is asked."""
+    if not answer or "예시" in answer:
+        return answer
+    compact = question.lower().replace(" ", "")
+    examples = [
+        (("npv" in compact and "irr" in compact), "100만원을 투자해 1년 뒤 110만원을 받고 할인율이 8%라면 NPV는 약 1.85만원입니다. IRR은 10%이므로 요구수익률 8%보다 높아 투자할 수 있습니다."),
+        (("회수기간" in compact), "100만원 투자 후 매년 40만원이 회수되면 단순 회수기간은 2.5년입니다. 할인회수기간은 각 현금흐름을 현재가치로 바꾸므로 더 길어집니다."),
+        (("명목이자율" in compact or "실효이자율" in compact), "명목 연이율 12%를 매월 복리로 적용하면 실효연이율은 (1+0.12/12)^12-1로 약 12.68%입니다."),
+        (("영구연금" in compact), "매년 100만원을 영구히 받고 할인율이 5%라면 현재가치는 2,000만원입니다. 현금흐름이 매년 2% 성장하면 100만원/(5%-2%)로 약 3,333만원입니다."),
+        (("capm" in compact), "무위험수익률 3%, 시장위험프리미엄 6%, 베타 1.2라면 CAPM 요구수익률은 3%+1.2×6%=10.2%입니다."),
+        (("샤프지수" in compact and "트레이너지수" in compact), "수익률 10%, 무위험수익률 3%, 변동성 14%, 베타 1.0이면 샤프지수는 0.50, 트레이너지수는 7%입니다."),
+        (("젠센" in compact and "알파" in compact), "CAPM 기대수익률이 9%인데 실제 수익률이 11%라면 젠센의 알파는 +2%입니다."),
+        (("블랙숄즈" in compact), "주가 100원, 행사가 100원, 만기 1년, 무위험수익률 3%, 변동성 20%를 입력해 콜옵션의 이론가격을 계산합니다."),
+        (("풋콜패리티" in compact), "만기와 행사가가 같은 옵션에서 C+행사가의 현재가치=P+현재 주가 관계가 어긋나면 차익거래 기회가 생길 수 있습니다."),
+        (("듀레이션" in compact or ("채권" in compact and "금리" in compact)), "수정듀레이션이 4인 채권은 금리가 1%p 상승할 때 가격이 대략 4% 하락합니다. 볼록성을 반영하면 이 근사치를 추가로 보정합니다."),
+        (("eva" in compact or "경제적부가가치" in compact), "NOPLAT 120억원, 투하자본 1,000억원, WACC 8%라면 EVA는 120억원-80억원=40억원입니다."),
+        (("민감도분석" in compact and "시뮬레이션" in compact), "민감도 분석은 매출 성장률만 5%에서 3%로 바꿔 결과를 비교하고, 시뮬레이션은 여러 변수의 확률분포로 수천 개 결과를 생성합니다."),
+    ]
+    example = next((text for matched, text in examples if matched), None)
+    return f"{answer.rstrip()}\n\n예시\n{example}" if example else answer
+
+
 def build_final_answer(question: str, tool_name: str, calculation: dict, references: list[dict]) -> str:
     if calculation.get("status") == "needs_company":
         return UNSUPPORTED_COMPANY_MESSAGE
@@ -82,6 +105,8 @@ def build_final_answer(question: str, tool_name: str, calculation: dict, referen
         return build_cost_of_sales_ear_answer(calculation)
     if calculation.get("mode") == "macro_scenario" and calculation.get("status") == "ok":
         return build_macro_scenario_answer(calculation)
+    if calculation.get("mode") == "growth_margin_stress" and calculation.get("status") == "ok":
+        return build_growth_margin_stress_answer(calculation)
         
     if calculation.get("status") == "latest_news":
         # If it's an industry trend query (no company, but has industry), bypass build_latest_news_answer
@@ -168,6 +193,34 @@ def build_macro_scenario_answer(calculation: dict) -> str:
         "",
         "환율·금리 탄력도와 WACC 변화에 기반한 시나리오이며, DCF 민감도 표의 최저·최고 적정 주가 범위는 아닙니다.",
     ])
+    return "\n".join(lines)
+
+
+def build_growth_margin_stress_answer(calculation: dict) -> str:
+    def format_money(value: float) -> str:
+        if abs(value) >= 1_0000_0000_0000:
+            return f"{value / 1_0000_0000_0000:.2f}조원"
+        if abs(value) >= 1_0000_0000:
+            return f"{value / 1_0000_0000:.2f}억원"
+        return f"{value:,.0f}원"
+
+    company = (calculation.get("company") or {}).get("company_name", "해당 기업")
+    assumptions = calculation.get("assumptions") or {}
+    base_income = float(calculation.get("base_operating_income") or 0)
+    scenario_income = float(calculation.get("scenario_operating_income") or 0)
+    change = float(calculation.get("value_change") or 0)
+    lines = [
+        calculation.get("summary") or f"{company}의 매출·수익성 스트레스 시나리오를 계산했습니다.",
+        "",
+        f"- 매출 성장률: {assumptions.get('base_growth', 0)*100:.2f}% → {assumptions.get('stressed_growth', 0)*100:.2f}%",
+        f"- 영업이익률: {assumptions.get('base_margin', 0)*100:.2f}% → {assumptions.get('stressed_margin', 0)*100:.2f}%",
+        f"- 예상 영업이익: {format_money(base_income)} → {format_money(scenario_income)} (기준 대비 {change*100:+.2f}%)",
+    ]
+    if calculation.get("scenario_price"):
+        lines.append(f"- 현재가 기준 가치 대용치: {float(calculation['latest_price']):,.0f}원 → {float(calculation['scenario_price']):,.0f}원")
+    else:
+        lines.append(f"- 가치 대용치 변화: {change*100:+.2f}%")
+    lines.extend(["", "과거 재무실적을 기준으로 한 단순 민감도 분석이며 실제 실적이나 목표주가를 의미하지 않습니다."])
     return "\n".join(lines)
 
 

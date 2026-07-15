@@ -23,6 +23,8 @@ def analyze_advanced_question(question: str) -> dict[str, Any]:
         return _cost_of_sales_ear_scenario(question)
     if "wacc" in compact and "영구성장률" in compact and "민감도" in compact:
         return _dcf_sensitivity_analysis(question)
+    if "스트레스" in compact and "매출성장률" in compact and "영업이익률" in compact:
+        return _growth_margin_stress_analysis(question)
     if "환율" in compact and "기준금리" in compact and any(token in compact for token in ["반도체가격", "메모리가격", "반도체가격하락"]):
         return _multi_factor_stress_test(question)
     if any(token in compact for token in ["몬테카를로", "기대수익률분포", "유리할확률"]):
@@ -256,6 +258,79 @@ def _multi_factor_stress_test(question: str) -> dict[str, Any]:
         "원/달러 환율 하락": -fx_drop * 0.45,
         "기준금리 상승": -rate_rise * (1.6 * debt_ratio),
         "반도체 가격 하락": -chip_price_drop * 0.70,
+    }
+
+
+def _growth_margin_stress_analysis(question: str) -> dict[str, Any]:
+    store = FinancialStatementStore()
+    company = _resolve_company(store, question)
+    if not company:
+        return {"status": "needs_company", "summary": "스트레스 분석 대상 기업명을 확인하지 못했습니다.", "steps": []}
+    years = store.available_years(company.stock_code)
+    if not years:
+        return {"status": "no_data", "summary": f"{company.company_name}의 재무 데이터를 찾지 못했습니다.", "steps": []}
+
+    end_year = max(years)
+    rows = store.get_account_series(
+        company.stock_code,
+        ["revenue", "operating_income"],
+        max(min(years), end_year - 3),
+        end_year,
+    )
+    rows = _fill_missing_series_with_yfinance(company, ["revenue", "operating_income"], rows, None)
+    rows = _prefer_dart_revenue_income_series(company, end_year, rows)
+    valid = [row for row in rows if _amount(row, "revenue") and _amount(row, "operating_income") is not None]
+    if not valid:
+        return {"status": "no_data", "summary": f"{company.company_name}의 매출액과 영업이익을 확인하지 못했습니다.", "steps": [], "company": company.__dict__}
+
+    latest = valid[-1]
+    latest_revenue = float(_amount(latest, "revenue"))
+    latest_operating_income = float(_amount(latest, "operating_income"))
+    base_margin = latest_operating_income / latest_revenue
+    revenue_values = [float(_amount(row, "revenue")) for row in valid]
+    historical_growth = _cagr(revenue_values)
+    base_growth = min(0.20, max(-0.10, historical_growth if historical_growth is not None else 0.05))
+    growth_drop = (_extract_percent(question, "매출 성장률") or 5.0) / 100
+    margin_drop = (_extract_percent(question, "영업이익률") or 2.0) / 100
+    stressed_growth = base_growth - growth_drop
+    stressed_margin = base_margin - margin_drop
+    base_revenue = latest_revenue * (1 + base_growth)
+    stressed_revenue = latest_revenue * (1 + stressed_growth)
+    base_income = base_revenue * base_margin
+    stressed_income = stressed_revenue * stressed_margin
+    income_change = (stressed_income - base_income) / abs(base_income) if base_income else 0.0
+    value_change = income_change
+    latest_price = _latest_price(company)
+    scenario_price = latest_price * max(0, 1 + value_change) if latest_price else None
+
+    return {
+        "status": "ok",
+        "mode": "growth_margin_stress",
+        "summary": f"매출 성장률 -{growth_drop*100:.1f}%p, 영업이익률 -{margin_drop*100:.1f}%p 충격 시 {company.company_name}의 예상 영업이익은 기준 대비 {abs(income_change)*100:.2f}% 악화됩니다.",
+        "steps": [
+            f"기준: {end_year}년 매출액 {_money(latest_revenue)}, 영업이익률 {base_margin*100:.2f}%",
+            f"기준 시나리오: 매출 성장률 {base_growth*100:.2f}%, 예상 매출액 {_money(base_revenue)}, 예상 영업이익 {_money(base_income)}",
+            f"스트레스 가정: 매출 성장률 {base_growth*100:.2f}% → {stressed_growth*100:.2f}%(-{growth_drop*100:.1f}%p), 영업이익률 {base_margin*100:.2f}% → {stressed_margin*100:.2f}%(-{margin_drop*100:.1f}%p)",
+            f"스트레스 결과: 예상 매출액 {_money(stressed_revenue)}, 예상 영업이익 {_money(stressed_income)}({income_change*100:+.2f}%)",
+            f"현재가 기준 가치 대용치: {latest_price:,.0f}원 → {scenario_price:,.0f}원" if scenario_price else f"가치 대용치 변화: {value_change*100:+.2f}%",
+            "적정가치 변화는 영업이익 변화율이 기업가치에 동일하게 반영된다는 단순 민감도 가정이며 투자 의견이 아닙니다.",
+        ],
+        "company": company.__dict__,
+        "base_revenue": base_revenue,
+        "scenario_revenue": stressed_revenue,
+        "base_operating_income": base_income,
+        "scenario_operating_income": stressed_income,
+        "value_change": value_change,
+        "latest_price": latest_price,
+        "scenario_price": scenario_price,
+        "assumptions": {
+            "base_growth": base_growth,
+            "growth_drop": growth_drop,
+            "base_margin": base_margin,
+            "margin_drop": margin_drop,
+            "stressed_growth": stressed_growth,
+            "stressed_margin": stressed_margin,
+        },
     }
     total_effect = max(-0.8, sum(effects.values()))
     stressed_income = operating_income * (1 + total_effect)
@@ -530,6 +605,47 @@ def _price_frame(company: Any, start: date, end: date):
 def _latest_price(company: Any) -> float | None:
     frame = _price_frame(company, date.today() - timedelta(days=30), date.today())
     return float(frame["Close"].iloc[-1]) if frame is not None and not frame.empty else None
+
+
+def _prefer_dart_revenue_income_series(company: Any, fiscal_year: int, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Use consolidated DART annual values when available; keep local rows as an offline fallback."""
+    if not load_dart_api_key():
+        return fallback
+    try:
+        client = DartClient()
+        result = None
+        for fs_div in ("CFS", "OFS"):
+            candidate = client.fetch_financial_accounts(
+                stock_code=company.stock_code,
+                corp_name=company.company_name,
+                fiscal_year=fiscal_year,
+                fs_div=fs_div,
+            )
+            if candidate.get("status") == "ok":
+                result = candidate
+                break
+        if not result:
+            return fallback
+        fields = {
+            fiscal_year - 2: "bfefrmtrm_amount",
+            fiscal_year - 1: "frmtrm_amount",
+            fiscal_year: "thstrm_amount",
+        }
+        dart_rows = []
+        for year, field in fields.items():
+            normalized = [
+                {**account, "thstrm_amount": account.get(field)}
+                for account in result.get("accounts") or []
+                if str(account.get(field) or "").strip()
+            ]
+            mapped = _map_dart_accounts(normalized)
+            revenue = mapped.get("revenue")
+            operating_income = mapped.get("operating_income")
+            if revenue and operating_income and revenue.get("amount") is not None and operating_income.get("amount") is not None:
+                dart_rows.append({"year": year, "revenue": revenue, "operating_income": operating_income})
+        return dart_rows if len(dart_rows) >= 2 else fallback
+    except Exception:
+        return fallback
 
 
 def _amount(row: dict[str, Any], key: str) -> float | None:
