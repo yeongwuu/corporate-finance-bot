@@ -21,7 +21,7 @@
 
 ## 3. Knowledge RAG
 
-- `backend/rag/simple_rag.py`는 `backend/knowledge/*.md` 문서를 검색해 재무관리 이론 근거를 제공합니다.
+- `backend/rag/internal_rag.py`는 `backend/knowledge/*.md` 문서를 검색해 재무관리 이론 근거를 제공합니다.
 - 지식 문서는 재무관리 정책, 기초 개념, 시간가치, 투자안 평가, 자본비용, 재무비율, 포트폴리오, 위험/수익, 운전자본, 기업가치평가, M&A, 답변 템플릿으로 나뉩니다.
 - 계산형 질문도 단순 계산 결과만 반환하지 않고, 관련 이론 문서의 기준과 함께 답변하도록 구성했습니다.
 

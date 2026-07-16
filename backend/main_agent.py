@@ -5,7 +5,7 @@ from typing import Callable
 from chart_builder import build_chart_spec
 from korean_particles import normalize_company_pair_particles
 from llm_client import append_concept_example, build_attachment_answer, build_final_answer
-from rag.simple_rag import search_knowledge
+from rag.internal_rag import search_knowledge
 from tools.capital_budgeting_tool import analyze_capital_budgeting
 from tools.company_analysis_tool import analyze_company_financials
 from tools.company_trend_tool import analyze_company_trend

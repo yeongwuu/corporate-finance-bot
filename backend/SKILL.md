@@ -2,7 +2,7 @@
 
 ## RAG
 
-- `rag/simple_rag.py`: `knowledge/*.md`에서 관련 재무관리 기준을 검색한다.
+- `rag/internal_rag.py`: `knowledge/*.md`에서 관련 재무관리 기준을 검색한다.
 - 실무 배포 시 Chroma, FAISS, pgvector 같은 벡터DB로 교체할 수 있다.
 
 ## LLM

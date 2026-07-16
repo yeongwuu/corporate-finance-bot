@@ -126,16 +126,16 @@ RECOMMENDED_QUESTION_COUNT = 5
 RECOMMENDED_QUESTION_POOL_SIZE = 200
 TOP_FIVE_COMPANIES = ["삼성전자", "SK하이닉스", "삼성전기", "현대차", "LG에너지솔루션"]
 DEFAULT_SEEDS = [
-    "삼성전자의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
-    "SK하이닉스의 최근 2개년 유동비율, 당좌비율과 부채비율 추이를 분석해줘",
+    "삼성전자의 최근 6개년 매출액과 영업이익 추이를 분석해줘",
+    "SK하이닉스의 최근 5개년 유동비율, 당좌비율과 부채비율 추이를 분석해줘",
     "셀트리온의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
     "한화에어로스페이스의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
-    "LIG넥스원의 최근 3개년 주요 재무지표 추이를 분석해줘",
+    "LIG넥스원의 최근 6개년 주요 재무지표 추이를 분석해줘",
     "에스엠의 최근 1년 주가 수익률과 변동성을 계산해줘",
-    "와이지엔터테인먼트의 최근 3개년 매출액과 영업이익을 비교해줘",
+    "와이지엔터테인먼트의 최근 6개년 매출액과 영업이익을 비교해줘",
     "삼성전자의 최근 5개년 PER 추이를 계산해줘",
     "SK하이닉스의 최근 3년 주가 흐름을 차트로 보여줘",
-    "셀트리온의 최근 3개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
+    "셀트리온의 최근 6개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
     "방산 산업의 최근 주요 동향과 뉴스 흐름을 분석해줘"
 ]
 CURATED_RECOMMENDATION_INDUSTRIES = [
@@ -228,7 +228,7 @@ def _init_questions_file():
 
         questions = [
             normalize_company_pair_particles(
-                q.replace("의 최근 당기순이익을 알려줘", "의 최근 3개년 당기순이익 추이를 분석해줘").strip().rstrip(".")
+                q.replace("의 최근 당기순이익을 알려줘", "의 최근 6개년 당기순이익 추이를 분석해줘").strip().rstrip(".")
             )
             for q in questions
             if isinstance(q, str) and q.strip()
@@ -255,14 +255,14 @@ def _generate_question_pool(limit: int) -> list[str]:
     from company_data.financial_store import FinancialStatementStore
 
     company_templates = [
-        "{company}의 최근 3개년 매출액과 영업이익 추이를 분석해줘",
+        "{company}의 최근 6개년 매출액과 영업이익 추이를 분석해줘",
         "{company}의 최근 5개년 주요 재무지표 추이를 분석해줘",
-        "{company}의 최근 2개년 유동비율, 당좌비율과 부채비율 추이를 분석해줘",
-        "{company}의 최근 3개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
+        "{company}의 최근 5개년 유동비율, 당좌비율과 부채비율 추이를 분석해줘",
+        "{company}의 최근 6개년 매출총이익률, 영업이익률과 당기순이익률 추이를 분석해줘",
         "{company}의 최근 1년 주가 변동성과 최대낙폭(MDD)을 계산해줘",
         "{company}의 최근 3년 주가 흐름을 차트로 보여줘",
         "{company}의 최근 5개년 매출 추이로 2026년 매출을 전망해줘",
-        "{company}의 최근 3개년 당기순이익 추이를 분석해줘",
+        "{company}의 최근 6개년 당기순이익 추이를 분석해줘",
     ]
     industry_templates = [
         "{industry} 업종 대표 기업의 매출을 비교해줘",
@@ -328,7 +328,7 @@ def _generate_question_pool(limit: int) -> list[str]:
         for index in range(0, len(unique_companies) - 1, 2):
             first, second = unique_companies[index:index + 2]
             candidates.extend([
-                f"{first}과 {second}의 최근 3개년 매출액과 영업이익을 비교해줘",
+                f"{first}과 {second}의 최근 6개년 매출액과 영업이익을 비교해줘",
                 f"{first}과 {second}의 최근 2년 주가 흐름을 비교해줘",
             ])
     candidates.extend(template.format(industry=industry) for industry in industries for template in industry_templates)

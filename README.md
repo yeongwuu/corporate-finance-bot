@@ -3,10 +3,12 @@
 기업재무 이론, 계산 문제, 상장기업 재무제표, 산업 비교, 뉴스·공시, 주가 분석을 하나의 대화형 인터페이스에서 처리하는 AI 재무 분석 챗봇입니다.
 
 - 배포 URL: https://corporate-finance-bot-web.onrender.com
-- Backend: FastAPI
+- Backend: FastAPI + Uvicorn (API 접수, 입력 검증, SSE 진행 상태, 오류 처리)
 - Frontend: React + Vite
 - Data: SQLite, DART Open API, Naver News, Naver Finance, Yahoo Finance
 - LLM: Gemini 또는 OpenAI
+
+FastAPI는 분석 계산을 직접 수행하는 엔진이 아니라 React 화면과 Main Agent를 연결하는 API 관문입니다. 질문을 검증해 분석 경로로 전달하고, Python Tool·RAG·SQLite·외부 API가 만든 결과를 실시간으로 반환합니다.
 
 ## 주요 기능
 
@@ -66,6 +68,8 @@ LLM answer + chart_builder.py
 Text / formula / source / SVG chart
 ```
 
+Internal RAG는 `backend/knowledge/`의 9개 재무관리 기준 문서에서 공식과 개념을 찾습니다. External RAG는 DART 사업보고서와 네이버 뉴스에서 기업·산업의 최신 사실을 찾습니다. 공식은 내부 지식, 최신 실적 원인은 외부 자료처럼 역할을 분리하며, 질문에 따라 두 경로를 함께 사용합니다.
+
 ## 프로젝트 구조
 
 ```text
@@ -88,9 +92,9 @@ backend/
 │   ├── financials.sqlite.gz
 │   └── successful_questions.json
 ├── rag/
-│   ├── simple_rag.py
+│   ├── internal_rag.py
 │   └── external_rag.py
-├── knowledge/              # 재무관리 기준 문서 12개
+├── knowledge/              # 재무관리 기준 문서 9개
 └── tools/                  # 재무 분석·계산 Tool
 ```
 
