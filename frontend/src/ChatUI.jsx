@@ -757,9 +757,6 @@ function MessageText({ message, onAskSuggestion }) {
   const [visibleText, setVisibleText] = useState(message.meta?.animate ? "" : message.content);
   const [isTyping, setIsTyping] = useState(Boolean(message.meta?.animate));
   const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState(null);
-  const [feedbackBurst, setFeedbackBurst] = useState(null);
-  const [isFolded, setIsFolded] = useState(false);
   const isInitialAssistantMessage = message.role === "assistant" && message.meta?.tool === "ready";
 
   useEffect(() => {
@@ -830,25 +827,19 @@ function MessageText({ message, onAskSuggestion }) {
 
   return (
     <>
-      {isFolded ? (
-        <p className="message-preview">{buildPreview(message.content)}</p>
-      ) : (
-        <>
-          <div className="message-body">{formatAnswerText(visibleText)}</div>
-          {isTyping ? (
-            <div className="answer-writing-dots" aria-label="답변 작성 중">
-              <LoadingDots />
-            </div>
-          ) : null}
-          <ChartPanel chart={message.meta?.chart} compact />
-          <SuggestionPanel
-            suggestions={message.meta?.suggestions}
-            title={message.meta?.suggestionTitle}
-            onAskSuggestion={onAskSuggestion}
-          />
-          <SourcePanel references={message.meta?.references} />
-        </>
-      )}
+      <div className="message-body">{formatAnswerText(visibleText)}</div>
+      {isTyping ? (
+        <div className="answer-writing-dots" aria-label="답변 작성 중">
+          <LoadingDots />
+        </div>
+      ) : null}
+      <ChartPanel chart={message.meta?.chart} compact />
+      <SuggestionPanel
+        suggestions={message.meta?.suggestions}
+        title={message.meta?.suggestionTitle}
+        onAskSuggestion={onAskSuggestion}
+      />
+      <SourcePanel references={message.meta?.references} />
       <FailureConsentPanel request={message.meta?.failureConsent} />
       {!isInitialAssistantMessage ? (
         <div className="message-actions" aria-label="답변 작업">

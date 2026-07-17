@@ -304,11 +304,6 @@ h2 {
   font-size: 15px;
 }
 
-.message-preview {
-  color: var(--text-muted);
-  font-size: 14px;
-}
-
 .answer-block {
   display: grid;
   gap: 6px;
@@ -432,38 +427,6 @@ h2 {
   border-color: var(--accent);
   background: #f5f2ee;
   color: var(--accent);
-}
-
-.feedback-button {
-  overflow: visible;
-}
-
-.feedback-burst {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  pointer-events: none;
-  font-size: 18px;
-  transform: translate(-50%, -50%);
-  animation: feedback-pop 620ms cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
-}
-
-@keyframes feedback-pop {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.6) rotate(0deg);
-  }
-
-  28% {
-    opacity: 1;
-    transform: translate(-50%, -150%) scale(1.25) rotate(-8deg);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -250%) scale(0.85) rotate(10deg);
-  }
 }
 
 .suggestion-panel {

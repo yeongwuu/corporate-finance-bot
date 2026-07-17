@@ -4,15 +4,16 @@
 
 Author: 장영우 · Email: yeongwuu@naver.com
 
-## 프로젝트 배경
+## Project Overview
 
-기업 재무를 분석하려면 이론, 계산, 공시, 뉴스와 주가 데이터를 각각 찾아 직접 종합해야 하는 번거로움이 있습니다. 이를 하나의 대화형 화면에서 처리하고 계산 결과와 근거를 함께 제공하기 위해 개발했습니다.
-
-- 배포 URL: https://corporate-finance-bot-web.onrender.com
-- Backend: FastAPI + Uvicorn (API 접수, 입력 검증, SSE 진행 상태, 오류 처리)
-- Frontend: React + Vite
-- Data: SQLite, DART Open API, Naver News, Naver Finance, Yahoo Finance
-- LLM: Gemini 또는 OpenAI
+| 항목 | 내용 |
+|---|---|
+| 프로젝트 목표 | 보유 데이터를 기반으로 재무관리 질문에 답변하는 챗봇 구축 |
+| 개발 기간 | 2026. 07. 09 ~ 진행 중 |
+| 기술 스택 | Python(FastAPI), React(Vite), DART Open API, 네이버 뉴스·금융 API, LLM API(Gemini/OpenAI), SQLite |
+| 핵심 구조 | Frontend(React) ↔ Backend(FastAPI) ↔ Main Agent(라우터) ↔ Internal·External RAG + LLM + Python Tools |
+| 배포 방식 | Render Blueprint(API 서비스 + 정적 웹 서비스 분리 배포) |
+| 배포 URL | https://corporate-finance-bot-web.onrender.com |
 
 ## 핵심 기능
 
@@ -21,21 +22,9 @@ Author: 장영우 · Email: yeongwuu@naver.com
 - **가치평가 및 시나리오 분석**: 기업가치·자본비용·현금흐름을 바탕으로 가치평가를 수행하고 다양한 가정에 따른 민감도와 위험 시나리오를 분석
 - **이론 및 문제 학습**: 재무관리 이론을 예제와 함께 학습하고 이미지·PDF 문제의 풀이 과정과 계산 결과를 제공
 
-## UI/UX
-
-- 재무 분석 서비스의 신뢰감과 가독성을 고려한 전체 색상·배경·버튼 체계 통일
-- 데스크톱과 모바일 화면에서 채팅·추천 패널·차트가 자연스럽게 배치되는 반응형 구성
-- SSE를 활용해 질문 해석, 데이터 확인, 계산과 답변 생성 상태를 실시간으로 표시
-- 검증된 추천 질문 5개를 상시 제공하고 재생성 시 직전 질문이 반복되지 않도록 구성
-- 내부 Tool 이름 대신 사용자가 이해하기 쉬운 아이콘과 데이터 확인·계산·답변 정리 문구 사용
-- 데이터 성격에 따라 라인·막대 SVG 차트를 구분하고 음수 값, 긴 라벨과 복수 지표의 가독성을 조정
-- 답변 접기·복사·좋아요·비추천과 실패 질문 수집 동의를 한 흐름에서 처리
-
-## 실패 질문 수집과 개인정보 동의
-
-데이터 부족이나 분석 실패가 발생해도 질문을 자동으로 수집하지 않으며, 사용자가 동의한 경우에만 저장합니다. 동의받은 실패 질문은 `backend/data/failed_questions.json`에 기록합니다.
-
 ## 처리 구조
+
+Corporate Finance Bot은 하나의 질문을 고정된 방식으로 처리하지 않습니다. 질문의 목적과 필요한 데이터에 따라 여러 분석 경로를 동적으로 조합합니다.
 
 ```mermaid
 flowchart TB
@@ -91,13 +80,29 @@ flowchart TB
     class LLM,CHART output;
 ```
 
-Internal RAG는 `backend/knowledge/`의 9개 재무관리 기준 문서에서 공식과 개념을 찾습니다. External RAG는 DART 사업보고서와 네이버 뉴스에서 기업·산업의 최신 사실을 찾습니다. 공식은 내부 지식, 최신 실적 원인은 외부 자료처럼 역할을 분리하며, 질문에 따라 두 경로를 함께 사용합니다.
-
 ## 핵심 설계
 
 - **멀티 동적 라우팅**: 질문의 의도·기업·기간·지표를 분석해 필요한 데이터와 Python Tool을 단독 또는 복합 선택
 - **Internal·External RAG 분리**: 고정된 재무 이론과 계속 변하는 공시·뉴스를 서로 다른 검색 경로로 관리
 - **계산과 해석의 역할 분리**: Python Tool이 공식과 수치를 계산하고 LLM은 결과 해석과 답변 정리를 담당
+
+## 데이터
+
+2019~2025년 코스피 시장의 Excel 재무 데이터를 사용하며 재무상태표, 손익계산서와 현금흐름표를 포함합니다. Excel 데이터를 정규화해 SQLite 데이터베이스에 적재하고 기업·연도·계정별 재무정보를 조회합니다.
+
+## UI/UX
+
+- 재무 분석 서비스의 신뢰감과 가독성을 고려한 전체 색상·배경·버튼 체계 통일
+- 데스크톱과 모바일 화면에서 채팅·추천 패널·차트가 자연스럽게 배치되는 반응형 구성
+- SSE를 활용해 질문 해석, 데이터 확인, 계산과 답변 생성 상태를 실시간으로 표시
+- 검증된 추천 질문 5개를 상시 제공하고 재생성 시 직전 질문이 반복되지 않도록 구성
+- 내부 Tool 이름 대신 사용자가 이해하기 쉬운 아이콘과 데이터 확인·계산·답변 정리 문구 사용
+- 데이터 성격에 따라 라인·막대 SVG 차트를 구분하고 음수 값, 긴 라벨과 복수 지표의 가독성을 조정
+- 답변 복사·공유와 실패 질문 수집 동의를 한 흐름에서 처리
+
+## 실패 질문 수집과 개인정보 동의
+
+데이터 부족이나 분석 실패가 발생해도 질문을 자동으로 수집하지 않으며, 사용자가 동의한 경우에만 저장합니다. 동의받은 실패 질문은 `backend/data/failed_questions.json`에 기록합니다.
 
 ## 프로젝트 구조
 
@@ -127,10 +132,6 @@ backend/
 └── tools/                  # 재무 분석·계산 Tool
 ```
 
-## 데이터
-
-2019~2025년 코스피 시장의 Excel 재무 데이터를 사용하며 재무상태표, 손익계산서와 현금흐름표를 포함합니다. Excel 데이터를 정규화해 SQLite 데이터베이스에 적재하고 기업·연도·계정별 재무정보를 조회합니다.
-
 ## 배포
 
 `render.yaml`은 API와 정적 웹 서비스를 함께 배포합니다.
@@ -139,10 +140,5 @@ backend/
 2. Render에서 Blueprint로 저장소를 연결합니다.
 3. API 서비스에 LLM, DART, Naver 환경변수를 설정합니다.
 4. `corporate-finance-bot-api`와 `corporate-finance-bot-web`을 배포합니다.
-
-배포 명령:
-
-- API: `cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT`
-- Web: `npm ci && npm run build`
 
 Render 무료 인스턴스는 비활성화 후 첫 요청이 느릴 수 있습니다.
