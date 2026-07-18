@@ -129,7 +129,7 @@ def _cost_of_sales_ear_scenario(question: str) -> dict[str, Any]:
             "company": company.__dict__,
         }
 
-    simulation_count = 5_000
+    simulation_count = _extract_simulation_count(question, default=5_000, maximum=100_000)
     rng = np.random.default_rng(2922)
     simulated_cost_ratio_changes = rng.normal(0.0, volatility, simulation_count)
     base_defense_probability = float(np.mean(simulated_cost_ratio_changes <= 0))
@@ -147,7 +147,7 @@ def _cost_of_sales_ear_scenario(question: str) -> dict[str, Any]:
         "steps": [
             f"백테스팅: {history[0]['year']}~{history[-1]['year']}년 매출원가율 {ratios_text}",
             f"역사적 변동성: 표본 표준편차 {volatility * 100:.2f}%",
-            f"시뮬레이션: 매출원가율 변화 5,000개 경로, 기준 EPS {base_eps:,.0f}원, 원가율 +{shock_pct:.1f}%p",
+            f"시뮬레이션: 매출원가율 변화 {simulation_count:,}개 경로, 기준 EPS {base_eps:,.0f}원, 원가율 +{shock_pct:.1f}%p",
             f"EPS 방어 확률: {base_defense_probability * 100:.1f}% → {scenario_defense_probability * 100:.1f}% ({probability_change * 100:.1f}%p)",
             "검증 로그: " + " | ".join(validation_logs),
             "매출원가율 이외의 매출·판관비·금융손익·세율은 기준 시점과 동일하다고 가정한 민감도 분석입니다.",
@@ -175,6 +175,19 @@ def _account_amount(accounts: dict[str, Any], key: str) -> float | None:
 def _extract_eps(question: str) -> float | None:
     match = re.search(r"eps[^0-9]{0,20}([0-9][0-9,]*(?:\.[0-9]+)?)\s*원?", question, re.IGNORECASE)
     return float(match.group(1).replace(",", "")) if match else None
+
+
+def _extract_simulation_count(question: str, default: int, maximum: int) -> int:
+    patterns = [
+        r"몬테카를로\s*([0-9][0-9,]*)\s*회",
+        r"([0-9][0-9,]*)\s*회(?:의)?\s*(?:몬테카를로|시뮬레이션)",
+        r"시뮬레이션\s*([0-9][0-9,]*)\s*회",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, question, re.IGNORECASE)
+        if match:
+            return min(maximum, max(100, int(match.group(1).replace(",", ""))))
+    return default
 
 
 def _find_basic_eps(rows: list[dict[str, Any]]) -> float | None:

@@ -17,6 +17,7 @@ from company_data.financial_store import FinancialStatementStore
 
 
 _PRICE_CACHE_TTL_SECONDS = int(os.getenv("PRICE_CACHE_TTL_SECONDS", "900"))
+_PRICE_CACHE_MAX_ENTRIES = max(1, int(os.getenv("PRICE_CACHE_MAX_ENTRIES", "12")))
 _PRICE_CACHE: dict[tuple[str, str, str, str], tuple[float, pd.DataFrame]] = {}
 _PRICE_CACHE_LOCK = threading.Lock()
 
@@ -38,7 +39,7 @@ def _cache_price_frame(key: tuple[str, str, str, str], frame: pd.DataFrame) -> N
         return
     with _PRICE_CACHE_LOCK:
         _PRICE_CACHE[key] = (time_module.monotonic(), frame.copy())
-        if len(_PRICE_CACHE) > 96:
+        if len(_PRICE_CACHE) > _PRICE_CACHE_MAX_ENTRIES:
             oldest_key = min(_PRICE_CACHE, key=lambda item: _PRICE_CACHE[item][0])
             _PRICE_CACHE.pop(oldest_key, None)
 

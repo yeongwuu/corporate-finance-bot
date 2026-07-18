@@ -80,6 +80,15 @@ class CostOfSalesEarTest(unittest.TestCase):
         self.assertEqual(chart["type"], "bar")
         self.assertEqual([bar["display"] for bar in chart["bars"]], ["49.3%", "21.0%"])
 
+    def test_requested_simulation_count_is_used(self):
+        question = QUESTION + " 몬테카를로 10,000회로 계산해줘"
+        with patch("tools.advanced_analysis_tool.FinancialStatementStore", return_value=_FakeStore()), patch(
+            "tools.advanced_analysis_tool.load_dart_api_key", return_value="key"
+        ), patch("tools.advanced_analysis_tool.DartClient", return_value=_FakeDartClient()):
+            result = analyze_advanced_question(question)
+        self.assertEqual(result["simulation_count"], 10_000)
+        self.assertIn("10,000개 경로", result["steps"][2])
+
 
 if __name__ == "__main__":
     unittest.main()

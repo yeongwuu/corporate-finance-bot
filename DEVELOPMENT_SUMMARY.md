@@ -27,7 +27,7 @@
 
 ## 4. Company Financial Statement Backend
 
-- `KOSDAQ_financial_statements.xlsx`를 기반으로 기업 재무제표 조회 기능을 구현했습니다.
+- `KRX_financial_statements.xlsx`를 기반으로 코스피·코스닥 기업 재무제표 조회 기능을 구현했습니다.
 - 커밋 가능한 크기를 위해 엑셀은 2019~2025년 `BS`, `PL`, `CF` 시트만 포함하고, 자본변동표 `CE`는 제외했습니다.
 - 파일 크기를 줄이기 위해 조회에 필요한 최소 컬럼만 유지했습니다.
 - `backend/company_data/financial_store.py`가 엑셀을 `backend/data/financials.sqlite` 캐시로 변환하고, 회사명/종목코드 검색과 연도별 계정 조회를 제공합니다.
@@ -78,8 +78,8 @@
 ## 10. Local Data and Git Hygiene
 
 - `.gitignore`에 `node_modules`, 프론트엔드 빌드 결과, Python 캐시, SQLite 캐시, DART/뉴스 생성물, 전체 원본 엑셀 백업을 제외했습니다.
-- `KOSDAQ_financial_statements.xlsx` 축소본은 다른 사용자가 저장소만 받아도 기업 분석 기능을 실행할 수 있도록 커밋 대상에 포함합니다.
-- `KOSDAQ_financial_statements.full.xlsx`는 로컬 백업 전용 원본이므로 커밋하지 않습니다.
+- `KRX_financial_statements.xlsx` 축소본은 다른 사용자가 저장소만 받아도 기업 분석 기능을 실행할 수 있도록 커밋 대상에 포함합니다.
+- `KRX_financial_statements.full.xlsx`는 로컬 백업 전용 원본이므로 커밋하지 않습니다.
 - `backend/data/financials.sqlite`는 엑셀에서 재생성 가능한 캐시이므로 커밋하지 않습니다.
 
 ## 11. Deployment

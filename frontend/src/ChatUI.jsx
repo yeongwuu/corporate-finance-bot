@@ -175,7 +175,11 @@ export default function ChatUI() {
   const fetchRecommendedQuestions = useCallback(async () => {
     for (const path of ["/api/recommended-questions", "/api/trending-questions"]) {
       try {
-        const response = await fetch(`${API_URL}${path}`);
+        const separator = path.includes("?") ? "&" : "?";
+        const response = await fetch(`${API_URL}${path}${separator}_=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        });
         if (!response.ok) continue;
         const data = await response.json();
         if (Array.isArray(data.questions) && data.questions.length > 0) {
@@ -397,7 +401,7 @@ export default function ChatUI() {
         error.name === "AbortError"
           ? "요청을 취소했습니다."
           : isNetworkLoadError(error)
-            ? "서버 연결이 일시적으로 끊겼습니다. 무료 서버가 시작 중일 수 있으니 잠시 후 다시 시도해 주세요."
+            ? "분석 중 서버 연결이 끊겼습니다. 무료 서버가 재시작 중이거나 일시적으로 사용량이 높을 수 있으니 잠시 후 다시 시도해 주세요."
             : error.message;
       const errorSuggestions = Array.isArray(error.suggestions)
         ? error.suggestions.filter((suggestion) => suggestion && suggestion !== displayQuestion).slice(0, 2)

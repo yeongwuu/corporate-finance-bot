@@ -21,6 +21,12 @@ services:
         sync: false
       - key: NEWS_PROVIDER
         sync: false
+      - key: MAX_CONCURRENT_ANALYSES
+        value: 1
+      - key: PRICE_CACHE_MAX_ENTRIES
+        value: 12
+      - key: MALLOC_ARENA_MAX
+        value: 2
       - key: NAVER_CLIENT_ID
         sync: false
       - key: NAVER_CLIENT_SECRET

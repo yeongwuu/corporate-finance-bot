@@ -1,10 +1,11 @@
+import gc
 import logging
 import os
 import random
 import re
 import time
 from datetime import datetime
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,6 +21,7 @@ app = FastAPI(title="Corporate Finance Bot API")
 
 logger = logging.getLogger("corporate_finance_bot")
 logging.basicConfig(level=logging.INFO)
+_analysis_slots = BoundedSemaphore(max(1, int(os.getenv("MAX_CONCURRENT_ANALYSES", "1"))))
 
 
 def _cors_origins() -> list[str]:
@@ -676,14 +678,20 @@ def find_similar_successful_questions(user_question: str) -> list[str]:
 
 @app.get("/api/recommended-questions")
 @app.get("/api/trending-questions", include_in_schema=False)
-def get_recommended_questions() -> dict:
+def get_recommended_questions() -> JSONResponse:
     # Generate dynamically shuffled fresh questions on every request
     questions = _generate_guaranteed_questions()
-    return {
-        "questions": questions,
-        "refresh_interval_seconds": 0,
-        "pool_size": _recommended_question_pool_size(),
-    }
+    return JSONResponse(
+        content={
+            "questions": questions,
+            "refresh_interval_seconds": 0,
+            "pool_size": _recommended_question_pool_size(),
+        },
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 def _recommended_question_pool_size() -> int:
@@ -710,12 +718,13 @@ def chat(request: ChatRequest) -> StreamingResponse:
             def on_step(step_index: int, message: str | None = None):
                 q.put(f"event: step\ndata: {json.dumps({'step_index': step_index, 'message': message}, ensure_ascii=False)}\n\n")
 
-            res = answer_finance_question(
-                question=request.question,
-                history=request.history,
-                attachment=request.attachment,
-                on_step=on_step
-            )
+            with _analysis_slots:
+                res = answer_finance_question(
+                    question=request.question,
+                    history=request.history,
+                    attachment=request.attachment,
+                    on_step=on_step
+                )
             result_status = (res.get("calculation") or {}).get("status") or res.get("status")
             if result_status == "ok" and not request.attachment and _is_verified_successful_result(request.question, res):
                 log_successful_question(request.question)
@@ -731,6 +740,7 @@ def chat(request: ChatRequest) -> StreamingResponse:
                 f"{json.dumps({'message': str(e), 'suggestions': suggestions}, ensure_ascii=False)}\n\n"
             )
         finally:
+            gc.collect()
             q.put(None)
 
     threading.Thread(target=run_agent, daemon=True).start()
