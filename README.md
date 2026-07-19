@@ -10,7 +10,7 @@ Author: 장영우 · Email: yeongwuu@naver.com
 |---|---|
 | 프로젝트 목표 | 보유 데이터를 기반으로 재무관리 질문에 답변하는 챗봇 구축 |
 | 개발 기간 | 2026. 07. 09 ~ 진행 중 |
-| 기술 스택 | Python(FastAPI), React(Vite), DART Open API, 네이버 뉴스·금융 API, LLM API(Gemini/OpenAI), SQLite |
+| 기술 스택 | Python(FastAPI), React(Vite), DART Open API, 네이버 뉴스 Open API·네이버 금융 웹 데이터 조회, LLM API(Gemini/OpenAI), SQLite |
 | 핵심 구조 | Frontend(React) ↔ Backend(FastAPI) ↔ Main Agent(라우터) ↔ Internal·External RAG + LLM + Python Tools |
 | 배포 방식 | Render Blueprint(API 서비스 + 정적 웹 서비스 분리 배포) |
 | 배포 URL | https://corporate-finance-bot-web.onrender.com |
