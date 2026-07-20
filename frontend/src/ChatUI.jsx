@@ -1327,7 +1327,13 @@ function formatAnswerText(text) {
   if (!text) return null;
 
   return text.split(/\n{2,}/).map((block, blockIndex) => {
-    const lines = block.split("\n").map(cleanDisplayLine).filter((line) => line && !isDecorativeIconLine(line));
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => {
+        const displayLine = cleanDisplayLine(line);
+        return displayLine && !isDecorativeIconLine(displayLine);
+      });
     if (lines.length === 1) {
       return renderAnswerLine(lines[0], `${blockIndex}-0`);
     }
@@ -1344,7 +1350,9 @@ function isDecorativeIconLine(line) {
 }
 
 function renderAnswerLine(line, key) {
-  const numberedStep = getNumberedStepMeta(line);
+  const rawLine = line.trim();
+  const displayLine = cleanDisplayLine(rawLine);
+  const numberedStep = getNumberedStepMeta(displayLine);
   if (numberedStep) {
     return (
       <p className="answer-step-heading" key={key}>
@@ -1354,7 +1362,7 @@ function renderAnswerLine(line, key) {
       </p>
     );
   }
-  const heading = getHeadingMeta(line);
+  const heading = getHeadingMeta(rawLine);
   if (heading) {
     return (
       <p className="answer-heading" key={key}>
@@ -1363,7 +1371,7 @@ function renderAnswerLine(line, key) {
       </p>
     );
   }
-  return <p key={key}>{renderInlineMath(line)}</p>;
+  return <p key={key}>{renderInlineMath(displayLine)}</p>;
 }
 
 function getNumberedStepMeta(line) {
@@ -1388,15 +1396,23 @@ function getHeadingMeta(line) {
   const isHeadingShape =
     /^#{1,6}\s+/.test(trimmed) ||
     /^\d+[.)]\s+/.test(trimmed) ||
-    (plain.length <= 24 && /[:：]$/.test(trimmed));
+    (plain.length <= 24 && /[:：]$/.test(trimmed)) ||
+    (
+      plain.length <= 32 &&
+      !/[.!?。]$/.test(plain) &&
+      /(요약|분포(?:\s*및\s*분석)?|분석|비교|결과|해석|전망|시사점|가정(?:\s*및\s*한계)?|한계|주의사항)$/.test(plain)
+    );
   const headingRules = [
     { tokens: ["핵심 요약", "요약"], icon: "✨" },
-    { tokens: ["비교 대상"], icon: "⚖️" },
+    { tokens: ["종합 비교", "비교 대상", "비교"], icon: "⚖️" },
+    { tokens: ["수익률 분포", "분포 및 분석", "분포", "분석"], icon: "📊" },
     { tokens: ["연도별 추이", "숫자 추이"], icon: "📈" },
     { tokens: ["인사이트"], icon: "💡" },
     { tokens: ["원인", "배경"], icon: "🔎" },
     { tokens: ["뉴스", "시장 반응"], icon: "📰" },
     { tokens: ["계산 요약"], icon: "🧮" },
+    { tokens: ["결과", "해석", "전망", "시사점"], icon: "💡" },
+    { tokens: ["가정 및 한계", "가정", "한계", "주의사항"], icon: "⚠️" },
     { tokens: ["기간:"], icon: "🏢" },
   ];
   const rule = headingRules.find((candidate) => candidate.tokens.some((token) => plain.includes(token)));
